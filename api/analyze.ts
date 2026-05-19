@@ -85,16 +85,16 @@ async function analyzeSource(sourceText: string): Promise<AnalysisResult> {
 
   if (provider === 'groq' && process.env.GROQ_API_KEY) {
     try {
-      return normalizeAnalysisResult(await analyzeWithGroq(sourceText));
+      return normalizeAnalysisResult(await analyzeWithGroq(sourceText), sourceText);
     } catch (error) {
-      throw new Error(error instanceof Error ? `Groq provider failed: ${error.message}` : 'Groq provider failed.');
+      return analyzeLocally(sourceText);
     }
   }
 
   return analyzeLocally(sourceText);
 }
 
-async function analyzeWithGroq(sourceText: string): Promise<AnalysisResult> {
+async function analyzeWithGroq(sourceText: string): Promise<unknown> {
   const model = process.env.GROQ_MODEL ?? 'openai/gpt-oss-20b';
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -131,7 +131,7 @@ async function analyzeWithGroq(sourceText: string): Promise<AnalysisResult> {
   const content = payload.choices?.[0]?.message?.content;
   if (!content) throw new Error(`No JSON content returned from Groq ${model}.`);
 
-  return JSON.parse(extractJsonObject(content)) as AnalysisResult;
+  return JSON.parse(extractJsonObject(content)) as unknown;
 }
 
 function analyzeLocally(sourceText: string): AnalysisResult {
@@ -201,22 +201,40 @@ function analyzeLocally(sourceText: string): AnalysisResult {
   };
 }
 
-function normalizeAnalysisResult(value: AnalysisResult): AnalysisResult {
-  const localFallback = analyzeLocally(`${value.eventSummary} before ${normalizeDeadline(value.acceptedMarket?.deadline ?? '')}`);
-  const acceptedMarket = value.acceptedMarket
-    ? normalizeMarket(value.acceptedMarket, value.region, value.eventSummary)
+function normalizeAnalysisResult(value: unknown, sourceText: string): AnalysisResult {
+  const localFallback = analyzeLocally(sourceText);
+  if (!isRecord(value)) return localFallback;
+
+  const eventSummary = readString(value, 'eventSummary') ?? localFallback.eventSummary;
+  const region = readString(value, 'region') ?? localFallback.region;
+  const acceptedMarketValue = value.acceptedMarket;
+  const acceptedMarket = isMarketLike(acceptedMarketValue)
+    ? normalizeMarket(acceptedMarketValue, region, eventSummary)
     : localFallback.acceptedMarket;
   const supplemental = acceptedMarket ? [
-    createRejectedCandidate(`${acceptedMarket.id}-news-proxy`, `Will major English-language outlets report that ${value.eventSummary.toLowerCase()} before ${acceptedMarket.deadline}?`, acceptedMarket.deadline, 'Major English-language news coverage', 42),
-    createRejectedCandidate(`${acceptedMarket.id}-market-impact`, `Will ${value.region} markets react positively if ${value.eventSummary.toLowerCase()} before ${acceptedMarket.deadline}?`, acceptedMarket.deadline, 'Market price movement', 28),
+    createRejectedCandidate(`${acceptedMarket.id}-news-proxy`, `Will major English-language outlets report that ${eventSummary.toLowerCase()} before ${acceptedMarket.deadline}?`, acceptedMarket.deadline, 'Major English-language news coverage', 42),
+    createRejectedCandidate(`${acceptedMarket.id}-market-impact`, `Will ${region} markets react positively if ${eventSummary.toLowerCase()} before ${acceptedMarket.deadline}?`, acceptedMarket.deadline, 'Market price movement', 28),
   ] : [];
-  const candidates = [acceptedMarket, ...value.candidateMarkets, ...supplemental]
+  const rawCandidates = Array.isArray(value.candidateMarkets)
+    ? value.candidateMarkets.filter(isMarketLike).map((candidate) => normalizeMarket(candidate, region, eventSummary))
+    : [];
+  const candidates = [acceptedMarket, ...rawCandidates, ...supplemental]
     .filter((item): item is MarketQuestion => Boolean(item))
     .filter((item, index, array) => array.findIndex((candidate) => candidate.id === item.id) === index)
     .slice(0, 3);
-  const rejectedMarkets = value.rejectedMarkets
-    .filter((item) => item.draftId !== acceptedMarket?.id)
-    .slice(0, 2);
+  const rejectedMarkets = Array.isArray(value.rejectedMarkets)
+    ? value.rejectedMarkets
+      .filter(isRejectedMarketLike)
+      .filter((item) => item.draftId !== acceptedMarket?.id)
+      .map((item) => ({
+        draftId: item.draftId,
+        question: item.question,
+        reasonRejected: item.reasonRejected,
+        violatedRule: normalizeViolatedRule(item.violatedRule),
+      }))
+    : [];
+
+  rejectedMarkets.splice(2);
 
   while (acceptedMarket && rejectedMarkets.length < 2) {
     const candidate = supplemental[rejectedMarkets.length];
@@ -229,11 +247,15 @@ function normalizeAnalysisResult(value: AnalysisResult): AnalysisResult {
   }
 
   return {
-    ...value,
-    sourceType: value.sourceType ?? 'article',
+    detectedLanguage: readString(value, 'detectedLanguage') ?? localFallback.detectedLanguage,
+    region,
+    sourceType: normalizeSourceType(readString(value, 'sourceType')),
     extractedSource: null,
-    entities: Array.isArray(value.entities) ? value.entities.slice(0, 12) : localFallback.entities,
-    eventSummary: value.eventSummary || localFallback.eventSummary,
+    entities: Array.isArray(value.entities)
+      ? value.entities.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 12)
+      : localFallback.entities,
+    eventSummary,
+    marketRelevance: normalizeMarketRelevance(value.marketRelevance, localFallback),
     candidateMarkets: candidates.length ? candidates : localFallback.candidateMarkets,
     acceptedMarket,
     rejectedMarkets,
@@ -248,11 +270,65 @@ function normalizeAnalysisResult(value: AnalysisResult): AnalysisResult {
             evidence: 'pass',
             resolutionSource: 'pass',
           },
-          reasoning: value.criticVerdict?.reasoning || 'Accepted: binary, deadline-bounded, and publicly resolvable.',
+          reasoning: isRecord(value.criticVerdict) && typeof value.criticVerdict.reasoning === 'string'
+            ? value.criticVerdict.reasoning
+            : 'Accepted: binary, deadline-bounded, and publicly resolvable.',
         }
-      : value.criticVerdict,
-    rejectionReason: acceptedMarket ? null : value.rejectionReason ?? 'No deadlineable public event could be validated.',
+      : localFallback.criticVerdict,
+    rejectionReason: acceptedMarket ? null : readString(value, 'rejectionReason') ?? 'No deadlineable public event could be validated.',
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readString(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function isMarketLike(value: unknown): value is MarketQuestion {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.question === 'string'
+    && typeof value.yesCriteria === 'string'
+    && typeof value.noCriteria === 'string'
+    && typeof value.deadline === 'string'
+    && typeof value.resolutionSource === 'string';
+}
+
+function isRejectedMarketLike(value: unknown): value is AnalysisResult['rejectedMarkets'][number] {
+  return isRecord(value)
+    && typeof value.draftId === 'string'
+    && typeof value.question === 'string'
+    && typeof value.reasonRejected === 'string';
+}
+
+function normalizeSourceType(value: string | undefined): AnalysisResult['sourceType'] {
+  if (value === 'article' || value === 'url_article' || value === 'official_report' || value === 'social_post' || value === 'other') {
+    return value;
+  }
+
+  return 'article';
+}
+
+function normalizeMarketRelevance(value: unknown, fallback: AnalysisResult): AnalysisResult['marketRelevance'] {
+  if (!isRecord(value)) return fallback.marketRelevance;
+
+  return {
+    level: value.level === 'Low' || value.level === 'Medium' || value.level === 'High' ? value.level : fallback.marketRelevance.level,
+    explanation: typeof value.explanation === 'string' && value.explanation.trim().length > 0 ? value.explanation : fallback.marketRelevance.explanation,
+    hasDeadlineableEvent: typeof value.hasDeadlineableEvent === 'boolean' ? value.hasDeadlineableEvent : true,
+  };
+}
+
+function normalizeViolatedRule(value: unknown): AnalysisResult['rejectedMarkets'][number]['violatedRule'] {
+  if (value === 'ambiguity' || value === 'no deadline' || value === 'subjective wording' || value === 'weak resolution') {
+    return value;
+  }
+
+  return 'ambiguity';
 }
 
 function normalizeMarket(market: MarketQuestion, region: string, eventSummary: string): MarketQuestion {
@@ -268,6 +344,9 @@ function normalizeMarket(market: MarketQuestion, region: string, eventSummary: s
     resolutionSource,
     yesCriteria: normalizeCriteria('YES', market.yesCriteria, resolutionSource, deadline),
     noCriteria: normalizeCriteria('NO', market.noCriteria, resolutionSource, deadline),
+    evidenceSummary: typeof market.evidenceSummary === 'string' && market.evidenceSummary.trim().length > 0
+      ? market.evidenceSummary
+      : `The source describes ${eventSummary} with a public resolution path.`,
     confidenceScore: clampConfidence(market.confidenceScore),
   };
 }
