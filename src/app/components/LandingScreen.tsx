@@ -317,7 +317,6 @@ function MicrodemoCard({ reduceMotion }: { reduceMotion: boolean | null }) {
   const progressMotion = (stage: number) => reduceMotion || !isRunning || activeStage !== stage
     ? { animate: { scaleX: 0, opacity: 0 } }
     : {
-      key: `${resetKey}-${stage}`,
       initial: { scaleX: 0, opacity: 1 },
       animate: { scaleX: 1, opacity: 1 },
       transition: { duration: microdemoStageSeconds, ease: 'linear' },
@@ -418,6 +417,7 @@ function MicrodemoCard({ reduceMotion }: { reduceMotion: boolean | null }) {
           )}
           </AnimatePresence>
           <motion.div
+            key={`${resetKey}-0`}
             aria-hidden="true"
             {...progressMotion(0)}
             className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-[#B67332]"
@@ -533,6 +533,7 @@ function MicrodemoCard({ reduceMotion }: { reduceMotion: boolean | null }) {
           )}
           </AnimatePresence>
           <motion.div
+            key={`${resetKey}-1`}
             aria-hidden="true"
             {...progressMotion(1)}
             className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-[#6D826E]"
@@ -588,6 +589,7 @@ function MicrodemoCard({ reduceMotion }: { reduceMotion: boolean | null }) {
           )}
           </AnimatePresence>
           <motion.div
+            key={`${resetKey}-2`}
             aria-hidden="true"
             {...progressMotion(2)}
             className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-[#CFA36A]"
