@@ -1367,6 +1367,9 @@ function FinalArtifact({
           </StepReveal>
           <StepReveal index={2} className="sm:col-span-2">
             <ArtifactField label="Resolution" value={`${market.deadline} · ${market.resolutionSource}`} />
+            <p className="mt-3 max-w-3xl text-sm font-medium leading-6 text-[#77746B]">
+              Resolution criteria and audit trace are packaged together for defensible review.
+            </p>
             <p className="mt-4 max-w-3xl text-base leading-7 text-[#625F57]">{market.evidenceSummary}</p>
           </StepReveal>
           <StepReveal index={3} className="border-t border-[#E5E1D8] pt-6 sm:col-span-2">

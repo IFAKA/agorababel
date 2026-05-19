@@ -136,8 +136,8 @@ export function MarketScreen({
                 <section className="grid gap-4 border-t border-[#E5E1D8] pt-4 sm:grid-cols-2">
                   <ReportField label="Deadline" value={market.deadline} />
                   <ReportField label="Resolution source" value={market.resolutionSource} />
-                  <ReportField label="Resolution Criteria" value={market.criticReasoning} />
-                  <ReportField label="Audit status" value="Prepared for Arc testnet commit." />
+                  <ReportField label="Resolution criteria" value={market.criticReasoning} />
+                  <ReportField label="Audit trace status" value="Prepared for Arc testnet commit from resolution criteria and rejected-candidate review." />
                   <ReportField
                     label="Audit Trace"
                     value={
