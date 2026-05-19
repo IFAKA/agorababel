@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/create",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/markets/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

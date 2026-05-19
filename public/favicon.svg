@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AgoraBabel">
+  <rect width="64" height="64" rx="12" fill="#1A1A1C"/>
+  <rect x="7" y="7" width="50" height="50" rx="9" fill="#242426" stroke="#B69668" stroke-opacity=".42" stroke-width="2"/>
+  <path d="M20 45V21h7.5c7.3 0 12.1 4.7 12.1 12s-4.8 12-12.1 12H20Z" fill="#D0B481"/>
+  <path d="M27 27h1.1c3.1 0 5 2.3 5 6s-1.9 6-5 6H27V27Z" fill="#1A1A1C"/>
+  <path d="M40 21h4v24h-4z" fill="#79A8BB"/>
+  <path d="M17 18h30M17 46h30" stroke="#EEEDE7" stroke-opacity=".22" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="47" cy="18" r="3" fill="#8FAE87"/>
+  <circle cx="17" cy="46" r="3" fill="#B69668"/>
+</svg>
