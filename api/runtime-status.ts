@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { handleRuntimeStatusRequest } from '../src/server/analyze';
+import { handleRuntimeStatusRequest } from '../src/server/analyze.ts';
 
 export default function handler(request: IncomingMessage, response: ServerResponse) {
   void handleRuntimeStatusRequest(request, response);
