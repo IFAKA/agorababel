@@ -1,13 +1,12 @@
-import { ArrowRight, Check, Clipboard, Download, RotateCcw } from 'lucide-react';
+import { ArrowRight, Check, Clipboard, Download } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { PipelineRun } from '../pipeline/types';
+import { pageContainerClassName } from './pageLayout';
 
 export function MarketScreen({
   pipelineRun,
-  onRunSampleArticle,
 }: {
   pipelineRun: PipelineRun;
-  onRunSampleArticle: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const market = pipelineRun.acceptedMarket;
@@ -28,8 +27,8 @@ export function MarketScreen({
             resolutionSource: market.resolutionSource,
             criticVerdict: market.criticReasoning,
             traceSummary: pipelineRun.trace
-              ? `Local trace hash, Arc commit pending: ${pipelineRun.trace.traceHash}.`
-              : 'Local trace hash pending. Arc commit pending.',
+              ? `Local audit trace prepared for Arc testnet commit: ${pipelineRun.trace.traceHash}.`
+              : 'Local audit trace prepared for Arc testnet commit after trace generation.',
           })
         : '',
     [context, ingestion, market, pipelineRun.trace],
@@ -58,12 +57,12 @@ export function MarketScreen({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-[#F7F6F1] text-[#191A1C]">
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto grid w-full max-w-5xl gap-5 px-5 py-5 sm:px-8 lg:px-10 lg:py-6">
+        <div className={pageContainerClassName}>
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E3DED3] pb-4">
             <div>
-              <div className="eyebrow">Finalized artifact</div>
+              <div className="eyebrow">Validated Prediction-Market Artifact</div>
               <div className="mt-2 text-sm text-[#77746B]">
-                {ingestion ? `Original language source: ${ingestion.language} / ${ingestion.source} / ${ingestion.region}` : 'No accepted artifact yet'}
+                {ingestion ? `Original-language source: ${ingestion.language} / ${ingestion.source} / ${ingestion.region}` : 'No persisted artifact found for this route.'}
               </div>
               {pipelineRun.analyzedInMs !== undefined && (
                 <div className="mt-1 text-sm font-medium text-[#77746B]">
@@ -71,36 +70,32 @@ export function MarketScreen({
                 </div>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={handleCopyMemo} disabled={!operatorMemo} className="primary-button pressable px-4 disabled:cursor-not-allowed disabled:opacity-45">
-                <span className="inline-flex items-center justify-center gap-2">
-                  {copied ? <Check aria-hidden="true" size={15} /> : <Clipboard aria-hidden="true" size={15} />}
-                  {copied ? 'Copied' : 'Copy'}
-                </span>
-              </button>
-              <button type="button" onClick={handleDownloadMemo} disabled={!operatorMemo} className="secondary-button pressable px-4 disabled:cursor-not-allowed disabled:opacity-45">
-                <span className="inline-flex items-center justify-center gap-2">
-                  <Download aria-hidden="true" size={15} />
-                  Markdown
-                </span>
-              </button>
-              <button type="button" onClick={onRunSampleArticle} className="secondary-button pressable px-4">
-                <span className="inline-flex items-center justify-center gap-2">
-                  <RotateCcw aria-hidden="true" size={15} />
-                  Use sample source
-                </span>
-              </button>
-            </div>
+            {operatorMemo && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={handleCopyMemo} className="primary-button pressable px-4">
+                  <span className="inline-flex items-center justify-center gap-2">
+                    {copied ? <Check aria-hidden="true" size={15} /> : <Clipboard aria-hidden="true" size={15} />}
+                    {copied ? 'Copied' : 'Copy'}
+                  </span>
+                </button>
+                <button type="button" onClick={handleDownloadMemo} className="secondary-button pressable px-4">
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Download aria-hidden="true" size={15} />
+                    Markdown
+                  </span>
+                </button>
+              </div>
+            )}
           </header>
 
           {!market || !context ? (
             <section className="artifact-card p-8 sm:p-12">
-              <div className="eyebrow">No market</div>
+              <div className="eyebrow">No persisted artifact</div>
               <h1 className="mt-5 max-w-3xl text-3xl font-semibold leading-tight tracking-normal text-[#171717] sm:text-5xl">
-                No accepted market artifact is available.
+                No persisted artifact found for this route.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-8 text-[#625F57]">
-                Run a source through /create. Rejected inputs do not produce a market.
+                Complete an analysis before opening an artifact route.
               </p>
             </section>
           ) : (
@@ -109,25 +104,25 @@ export function MarketScreen({
                 <section className="grid gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm font-semibold text-[#292824] sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:items-center">
                   <FlowStep label="Source" />
                   <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
-                  <FlowStep label="Rejected markets" />
+                  <FlowStep label="Candidate Markets Rejected" />
                   <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
-                  <FlowStep label="Accepted market" />
+                  <FlowStep label="Final Market" />
                   <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
-                  <FlowStep label="Local trace" />
+                  <FlowStep label="Audit Trace" />
                 </section>
 
                 <div>
-                  <p className="text-sm font-medium text-[#77746B]">Foreign-language source excerpt</p>
+                  <p className="text-sm font-medium text-[#77746B]">Source</p>
                   <p className="mt-2 max-w-4xl text-sm leading-6 text-[#625F57]">{createSourceExcerpt(pipelineRun.sourceInput)}</p>
                 </div>
 
                 <div className="border-t border-[#E5E1D8] pt-4">
-                  <p className="text-sm font-medium text-[#77746B]">English summary</p>
+                  <p className="text-sm font-medium text-[#77746B]">Translation & Context</p>
                   <p className="mt-2 max-w-4xl text-sm leading-6 text-[#625F57]">{context.englishSummary}</p>
                 </div>
 
                 <div className="border-t border-[#E5E1D8] pt-4">
-                  <p className="text-sm font-medium text-[#77746B]">Final accepted validated market draft</p>
+                  <p className="text-sm font-medium text-[#77746B]">Final Market</p>
                   <h1 className="mt-3 max-w-4xl text-2xl font-semibold leading-tight tracking-normal text-[#171717] sm:text-3xl">
                     {market.question}
                   </h1>
@@ -141,25 +136,25 @@ export function MarketScreen({
                 <section className="grid gap-4 border-t border-[#E5E1D8] pt-4 sm:grid-cols-2">
                   <ReportField label="Deadline" value={market.deadline} />
                   <ReportField label="Resolution source" value={market.resolutionSource} />
-                  <ReportField label="Critic verdict" value={market.criticReasoning} />
-                  <ReportField label="Arc status" value="Arc commit pending." />
+                  <ReportField label="Resolution Criteria" value={market.criticReasoning} />
+                  <ReportField label="Audit status" value="Prepared for Arc testnet commit." />
                   <ReportField
-                    label="Local trace hash, Arc commit pending"
+                    label="Audit Trace"
                     value={
                       pipelineRun.trace
                         ? pipelineRun.trace.traceHash
-                        : 'Local trace hash pending.'
+                        : 'Trace hash generated from structured analysis outputs.'
                     }
                   />
                 </section>
 
                 <section className="border-t border-[#E5E1D8] pt-4">
-                  <div className="eyebrow">Rejected candidate markets</div>
+                  <div className="eyebrow">Candidate Markets Rejected</div>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     {getRejectedMarkets(pipelineRun).map((rejected) => (
                       <div key={rejected.draftId} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3">
                         <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8C3D32]">
-                          Violated rule: {rejected.violatedRule}
+                          Rejected: {formatRejectedReason(rejected.violatedRule)}
                         </div>
                         <div className="mt-2 text-sm font-semibold leading-6 text-[#292824]">{rejected.question}</div>
                         <p className="mt-1 text-sm leading-6 text-[#625F57]">{rejected.reasonRejected}</p>
@@ -246,29 +241,48 @@ function createOperatorMemo({
   traceSummary: string;
 }) {
   return [
-    '# AgoraBabel Market Artifact',
+    '# Validated Prediction-Market Artifact',
     '',
-    `Source: ${sourceTitle}`,
-    `Original language: ${originalLanguage}`,
+    '## Source',
+    'Original-language material analyzed by the system.',
+    `Material: ${sourceTitle}`,
+    `Language: ${originalLanguage}`,
     `Region: ${region}`,
     '',
-    '## Source Reasoning',
+    '## Translation & Context',
+    'English operational summary and market implications.',
     englishSummary,
     '',
-    '## Accepted Market',
+    '## Candidate Markets Rejected',
+    'Drafts rejected during validation review are included in the application view.',
+    '',
+    '## Final Market',
+    'Validated YES/NO market artifact.',
     question,
     '',
     `YES: ${yesCriteria}`,
     '',
     `NO: ${noCriteria}`,
     '',
+    '## Resolution Criteria',
+    'Official conditions required for resolution.',
     `Deadline: ${deadline}`,
-    `Resolution source: ${resolutionSource}`,
-    '',
-    '## Critic Decision',
+    `Official source: ${resolutionSource}`,
     criticVerdict,
     '',
-    '## Local Trace Hash',
+    '## Audit Trace',
+    'Local reasoning trace hash prepared for Arc testnet commit.',
     traceSummary,
   ].join('\n');
+}
+
+function formatRejectedReason(rule: string) {
+  const normalized = rule.toLowerCase();
+
+  if (normalized.includes('deadline')) return 'Missing deadline';
+  if (normalized.includes('evidence')) return 'Weak evidence';
+  if (normalized.includes('subjective')) return 'Subjective wording';
+  if (normalized.includes('binary')) return 'Non-binary outcome';
+  if (normalized.includes('resolution')) return 'Ambiguous resolution';
+  return 'Ambiguous resolution';
 }

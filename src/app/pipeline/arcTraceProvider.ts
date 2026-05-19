@@ -10,7 +10,7 @@ type ExternalArcCommitResponse = {
 
 export class ArcTraceProvider implements TraceProvider {
   async commit(_payload: TracePayload): Promise<TraceRecord> {
-    throw new Error('Arc commit pending.');
+    throw new Error('Arc testnet commit is not configured.');
   }
 
   protected mapCommitResponse(response: ExternalArcCommitResponse): TraceRecord {
@@ -24,7 +24,7 @@ export class ArcTraceProvider implements TraceProvider {
 
     return {
       traceHash: response.hash,
-      transactionId: 'Arc commit pending',
+      transactionId: 'Prepared for Arc testnet commit',
       network: 'Local trace hash',
       status: response.status === 'failed' ? 'failed' : 'pending',
       timestamp: response.timestamp,

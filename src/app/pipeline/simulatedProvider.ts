@@ -38,7 +38,7 @@ export class SimulatedPipelineProvider implements PipelineProvider {
     const resolvedRun = createResolvedPipelineRun(submission.sourceText, submission);
     let run = runAgentPipeline(submission);
     run = updateRun(run, { status: 'running' });
-    run = appendActivity(run, 'AgoraBabel Orchestrator', 'running', 'Run started from submitted source.', 'The workflow keeps each agent output visible for audit.');
+    run = appendActivity(run, 'Source Analysis', 'running', 'Run started from submitted source.', 'The workflow keeps each structured output visible for audit.');
     yield { type: 'run-started', run };
 
     try {
@@ -69,16 +69,16 @@ export class SimulatedPipelineProvider implements PipelineProvider {
       });
 
       run = updateRun(run, { status: 'trace-committed', trace });
-      run = appendActivity(run, 'Local Trace', 'committed', 'Local trace hash generated. Arc commit pending.', 'The local trace hash fingerprints source, agent artifacts, critic verdicts, and the accepted market.');
+      run = appendActivity(run, 'Audit Trace', 'committed', 'Trace hash generated from structured analysis outputs.', 'Local audit trace prepared for Arc testnet commit.');
       yield { type: 'trace-committed', run, trace };
 
       run = updateRun(run, { status: 'complete' });
-      run = appendActivity(run, 'Final Output', 'accepted', 'Best accepted YES/NO market is ready to copy.', resolvedRun.acceptedMarket!.criticReasoning);
+      run = appendActivity(run, 'Artifact Generation', 'accepted', 'Validated YES/NO market artifact is ready to copy.', resolvedRun.acceptedMarket!.criticReasoning);
       yield { type: 'run-completed', run };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Pipeline failed.';
       run = updateRun(run, { status: 'failed', error: message });
-      run = appendActivity(run, 'AgoraBabel Orchestrator', 'failed', message, 'The run stopped before a final market could be validated.');
+      run = appendActivity(run, 'Source Analysis', 'failed', message, 'The run stopped before a final market could be validated.');
       yield { type: 'run-failed', run, error: message };
     }
   }
@@ -130,7 +130,7 @@ export async function createArcTrace(agentRun: AgentRun | TracePayload): Promise
 
   return {
     traceHash: `sha256:${traceHash}`,
-    transactionId: 'Arc commit pending',
+    transactionId: 'Prepared for Arc testnet commit',
     network: 'Local trace hash',
     status: 'pending',
     timestamp: new Date().toISOString(),
@@ -217,7 +217,7 @@ export function createDemoArtifactRun(): PipelineRun {
     analyzedInMs: 0,
     trace: {
       traceHash: `local:${traceHash}`,
-      transactionId: 'Arc commit pending',
+      transactionId: 'Prepared for Arc testnet commit',
       network: 'Local trace hash',
       status: 'pending',
       timestamp: now,
@@ -226,10 +226,10 @@ export function createDemoArtifactRun(): PipelineRun {
       {
         id: `activity-${traceHash}-local-trace`,
         timestamp: now,
-        agentName: 'Local Trace',
+        agentName: 'Audit Trace',
         status: 'committed',
-        message: 'Local trace hash loaded from bundled fallback.',
-        reasoningSnippet: 'Arc commit pending.',
+        message: 'Trace hash generated from structured analysis outputs.',
+        reasoningSnippet: 'Local audit trace prepared for Arc testnet commit.',
       },
       ...resolvedRun.activityFeed,
     ],
@@ -238,12 +238,12 @@ export function createDemoArtifactRun(): PipelineRun {
 
 function createQueuedPipelineSteps(): PipelineStep[] {
   return [
-    createStep('extraction', 'Source Extraction', 'Source Extraction Agent', 'Prepare submitted text or article content for analysis.', 'Waiting for the submitted source.', 'Source content will appear after extraction.'),
-    createStep('ingestion', 'Source Scout', 'Source Scout Agent', 'Parse language, source, date, entities, region, and source credibility.', 'Waiting for the submitted source.', 'Source metadata will appear after ingestion.'),
-    createStep('context', 'Signal Analyst', 'Signal Analyst Agent', 'Translate the report, identify market relevance, and estimate English-market lag.', 'Waiting for source extraction.', 'Context summary will appear after translation.'),
-    createStep('market-creator', 'Market Structurer', 'Market Structurer Agent', 'Generate objective, binary, time-bounded market candidates from the signal.', 'Waiting for translated context.', 'Candidate markets will appear after structuring.'),
-    createStep('critic', 'Resolution Critic', 'Resolution Critic Agent', 'Reject weak candidates and approve only markets with clear criteria and public resolution.', 'Waiting for candidates.', 'Critic verdicts will appear after validation.'),
-    createStep('settlement', 'Audit Trace', 'Local Trace Agent', 'Package the accepted market with a local trace hash.', 'Waiting for an accepted market.', 'Local trace hash will appear after artifact packaging.'),
+    createStep('extraction', 'Source Extraction', 'Source Extraction', 'Prepare submitted text or article content for analysis.', 'Waiting for the submitted source.', 'Source content will appear after extraction.'),
+    createStep('ingestion', 'Source Metadata', 'Source Metadata', 'Parse language, source, date, entities, region, and source credibility.', 'Waiting for the submitted source.', 'Source metadata will appear after extraction.'),
+    createStep('context', 'Translation & Context', 'Translation & Context', 'Translate the report and identify market relevance.', 'Waiting for source extraction.', 'Context summary will appear after translation.'),
+    createStep('market-creator', 'Market Drafting', 'Market Drafting', 'Generate objective, binary, time-bounded market candidates from the source.', 'Waiting for translated context.', 'Candidate markets will appear after drafting.'),
+    createStep('critic', 'Validation Review', 'Validation Review', 'Reject weak candidates and approve only markets with clear criteria and public resolution.', 'Waiting for candidates.', 'Validation results will appear after review.'),
+    createStep('settlement', 'Trace Commit', 'Audit Trace', 'Package the accepted market with a local trace hash.', 'Waiting for an accepted market.', 'Trace hash will appear after artifact packaging.'),
   ];
 }
 
@@ -354,7 +354,7 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
       noCriteria: 'NO otherwise.',
       deadline,
       resolutionSource: 'Major English-language news coverage',
-      evidenceSummary: 'Rejected candidate included to show the critic filtering out source-lag and coverage-dependent wording.',
+      evidenceSummary: 'Rejected candidate included to show validation filtering out source-lag and coverage-dependent wording.',
       confidenceScore: 55,
     },
     {
@@ -364,7 +364,7 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
       noCriteria: 'NO if they do not.',
       deadline,
       resolutionSource: 'Market price movement',
-      evidenceSummary: 'Rejected candidate included because AgoraBabel is not a profit-prediction or trading bot.',
+      evidenceSummary: 'Rejected candidate included because the system requires objective public outcomes, not price direction.',
       confidenceScore: 31,
     },
   ];
@@ -454,12 +454,12 @@ function createPipelineSteps(
   const acceptedCount = reviews.filter((review) => review.decision === 'accepted').length;
 
   return [
-    createStep('extraction', 'Source Extraction', 'Source Extraction Agent', 'Prepare submitted text or article content for analysis.', 'Source text is available for analysis.', 'Prepared source content for language and entity detection.'),
-    createStep('ingestion', 'Source Scout', 'Source Scout Agent', 'Parse language, source, date, entities, region, and source credibility.', `${ingestion.language} source with ${ingestion.entities.length} extracted entities and a named local outlet.`, `${ingestion.language} from ${ingestion.source}; region ${ingestion.region}; topic ${ingestion.topic}.`),
-    createStep('context', 'Signal Analyst', 'Signal Analyst Agent', 'Translate the report, identify market relevance, and estimate English-market lag.', context.relevanceExplanation, context.englishSummary),
-    createStep('market-creator', 'Market Structurer', 'Market Structurer Agent', 'Generate objective, binary, time-bounded market candidates from the signal.', `${drafts.length} candidate markets generated; one uses official-action resolution instead of English-news lag.`, `Drafted ${drafts.length} YES/NO candidates including "${acceptedMarket.question}"`),
-    createStep('critic', 'Resolution Critic', 'Resolution Critic Agent', 'Reject weak candidates and approve only markets with clear criteria and public resolution.', `${acceptedCount}/${reviews.length} candidates accepted after ambiguity, evidence, and resolution checks.`, acceptedMarket.criticReasoning),
-    createStep('settlement', 'Audit Trace', 'Local Trace Agent', 'Package the accepted market with a local trace hash.', 'Arc commit pending.', 'Prepared local trace hash metadata for the accepted artifact.'),
+    createStep('extraction', 'Source Extraction', 'Source Extraction', 'Prepare submitted text or article content for analysis.', 'Source text is available for analysis.', 'Prepared source content for language and entity detection.'),
+    createStep('ingestion', 'Source Metadata', 'Source Metadata', 'Parse language, source, date, entities, region, and source credibility.', `${ingestion.language} source with ${ingestion.entities.length} extracted entities and a named local outlet.`, `${ingestion.language} from ${ingestion.source}; region ${ingestion.region}; topic ${ingestion.topic}.`),
+    createStep('context', 'Translation & Context', 'Translation & Context', 'Translate the report and identify market relevance.', context.relevanceExplanation, context.englishSummary),
+    createStep('market-creator', 'Market Drafting', 'Market Drafting', 'Generate objective, binary, time-bounded market candidates from the source.', `${drafts.length} candidate markets generated; one uses official-action resolution instead of English-news lag.`, `Drafted ${drafts.length} YES/NO candidates including "${acceptedMarket.question}"`),
+    createStep('critic', 'Validation Review', 'Validation Review', 'Reject weak candidates and approve only markets with clear criteria and public resolution.', `${acceptedCount}/${reviews.length} candidates accepted after ambiguity, evidence, and resolution checks.`, acceptedMarket.criticReasoning),
+    createStep('settlement', 'Trace Commit', 'Audit Trace', 'Package the accepted market with a local trace hash.', 'Prepared for Arc testnet commit.', 'Trace hash generated from structured analysis outputs.'),
   ];
 }
 

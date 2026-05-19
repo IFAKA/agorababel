@@ -193,6 +193,10 @@
     line-height: 1.5;
   }
 
+  p {
+    text-wrap: balance;
+  }
+
   label {
     font-size: var(--text-base);
     font-weight: var(--font-weight-medium);

@@ -3,7 +3,15 @@ import { createHash } from 'node:crypto';
 import { AnalysisResultSchema, analyzeRequestSchema, analysisJsonSchema, type AnalysisResult } from '../app/pipeline/analysisSchema';
 
 const MIN_ARTICLE_LENGTH = 120;
-const UNSUPPORTED_URL_HOSTS = ['facebook.com', 'instagram.com', 'linkedin.com', 'tiktok.com', 'x.com', 'twitter.com'];
+const MIN_EXTRACTED_URL_LENGTH = 40;
+const SOCIAL_URL_HOSTS = ['facebook.com', 'instagram.com', 'linkedin.com', 'tiktok.com', 'x.com', 'twitter.com'];
+const X_URL_HOSTS = ['x.com', 'twitter.com'];
+
+type PreparedSource = {
+  text: string;
+  sourceType: AnalysisResult['sourceType'];
+  extractedSource: AnalysisResult['extractedSource'];
+};
 
 export async function handleAnalyzeRequest(request: IncomingMessage, response: ServerResponse) {
   if (request.method !== 'POST') {
@@ -34,7 +42,7 @@ export async function handleAnalyzeRequest(request: IncomingMessage, response: S
     const analysis = normalizeAnalysisResult(await analyzeSourceContent(preparedSource.text, preparedSource));
     const validated = AnalysisResultSchema.safeParse({
       ...analysis,
-      sourceType: preparedSource.extractedSource ? 'url_article' : analysis.sourceType,
+      sourceType: preparedSource.extractedSource ? preparedSource.sourceType : analysis.sourceType,
       extractedSource: preparedSource.extractedSource,
     });
 
@@ -115,43 +123,85 @@ export async function handleRuntimeStatusRequest(request: IncomingMessage, respo
   });
 }
 
-async function prepareSource(input: string): Promise<{ text: string; extractedSource: AnalysisResult['extractedSource'] }> {
+async function prepareSource(input: string): Promise<PreparedSource> {
   if (!isArticleUrl(input)) {
     if (input.trim().length < MIN_ARTICLE_LENGTH) {
       throw new Error('Paste at least 120 characters of article or source text.');
     }
 
-    return { text: input, extractedSource: null };
+    return { text: input, sourceType: 'article', extractedSource: null };
   }
 
   const url = new URL(input.trim());
-  if (UNSUPPORTED_URL_HOSTS.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))) {
-    throw new Error('Unsupported URL: social media scraping is not enabled yet. Paste the post text manually, or use a readable news/article URL.');
+  const sourceType: AnalysisResult['sourceType'] = isSocialUrlHost(url.hostname) ? 'social_post' : 'url_article';
+  const jinaExtracted = await extractWithJinaReader(url);
+
+  if (jinaExtracted && jinaExtracted.text.length >= MIN_ARTICLE_LENGTH) {
+    return { text: jinaExtracted.text, sourceType, extractedSource: jinaExtracted };
   }
 
-  const readerUrl = `https://r.jina.ai/http://${input.trim().replace(/^https?:\/\//i, '')}`;
-  const readerResponse = await fetch(readerUrl, {
-    headers: {
-      Accept: 'text/plain',
-      'User-Agent': 'AgoraBabel-SaaS/1.0',
-    },
-  });
+  const xExtracted = isXUrlHost(url.hostname) ? await extractWithTwitterOEmbed(url) : null;
+  const extracted = xExtracted ?? jinaExtracted;
 
-  if (!readerResponse.ok) {
-    throw new Error('Article extraction failed. Paste the article text or try a readable news URL.');
+  if (!extracted || extracted.text.length < MIN_EXTRACTED_URL_LENGTH) {
+    throw new Error('URL extraction produced too little readable text to analyze. Paste the source text instead, or try a public readable URL.');
   }
 
-  const readableText = await readerResponse.text();
-  const extracted = parseJinaReaderText(readableText, input.trim());
-
-  if (extracted.text.length < MIN_ARTICLE_LENGTH) {
-    throw new Error('Article extraction produced too little readable text to analyze.');
-  }
-
-  return { text: extracted.text, extractedSource: extracted };
+  return { text: extracted.text, sourceType, extractedSource: extracted };
 }
 
-async function analyzeSourceContent(sourceText: string, preparedSource: { extractedSource: AnalysisResult['extractedSource'] }): Promise<AnalysisResult> {
+async function extractWithJinaReader(url: URL): Promise<AnalysisResult['extractedSource']> {
+  const readerUrl = `https://r.jina.ai/http://${url.href.replace(/^https?:\/\//i, '')}`;
+
+  try {
+    const readerResponse = await fetch(readerUrl, {
+      headers: {
+        Accept: 'text/plain',
+        'User-Agent': 'AgoraBabel-SaaS/1.0',
+      },
+    });
+
+    if (!readerResponse.ok) return null;
+
+    const readableText = await readerResponse.text();
+    return parseJinaReaderText(readableText, url.href);
+  } catch {
+    return null;
+  }
+}
+
+async function extractWithTwitterOEmbed(url: URL): Promise<AnalysisResult['extractedSource']> {
+  const oembedUrl = new URL('https://publish.twitter.com/oembed');
+  oembedUrl.searchParams.set('url', url.href);
+  oembedUrl.searchParams.set('omit_script', 'true');
+
+  try {
+    const response = await fetch(oembedUrl, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'AgoraBabel-SaaS/1.0',
+      },
+    });
+
+    if (!response.ok) return null;
+
+    const payload = await response.json() as { author_name?: string; html?: string; title?: string };
+    const text = htmlToReadableText(payload.html ?? '');
+
+    if (!text) return null;
+
+    return {
+      title: payload.title?.trim() || payload.author_name?.trim() || new URL(url.href).hostname,
+      domain: url.hostname.replace(/^www\./, ''),
+      url: url.href,
+      text,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function analyzeSourceContent(sourceText: string, preparedSource: PreparedSource): Promise<AnalysisResult> {
   const provider = await resolveAnalysisProvider();
 
   if (provider === 'local') {
@@ -695,7 +745,7 @@ function extractJsonObject(value: string) {
   return trimmed;
 }
 
-function analyzeLocally(sourceText: string, preparedSource: { extractedSource: AnalysisResult['extractedSource'] }): AnalysisResult {
+function analyzeLocally(sourceText: string, preparedSource: PreparedSource): AnalysisResult {
   const lowerText = sourceText.toLowerCase();
   const region = detectRegion(lowerText);
   const detectedLanguage = detectLanguage(lowerText);
@@ -709,13 +759,13 @@ function analyzeLocally(sourceText: string, preparedSource: { extractedSource: A
   const base = {
     detectedLanguage,
     region,
-    sourceType: preparedSource.extractedSource ? 'url_article' as const : 'article' as const,
+    sourceType: preparedSource.sourceType,
     extractedSource: preparedSource.extractedSource,
     entities,
     eventSummary,
   };
 
-  if (sourceText.trim().length < MIN_ARTICLE_LENGTH) {
+  if (!preparedSource.extractedSource && sourceText.trim().length < MIN_ARTICLE_LENGTH) {
     return rejected(base, 'Input is too short to analyze as an article or event source.');
   }
 
@@ -845,6 +895,25 @@ function parseJinaReaderText(readableText: string, originalUrl: string) {
   };
 }
 
+function htmlToReadableText(html: string) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>|<\/blockquote>|<\/div>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/https?:\/\/t\.co\/\S+/g, '')
+    .replace(/\s+\n/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function isArticleUrl(value: string): boolean {
   try {
     const url = new URL(value.trim());
@@ -852,6 +921,14 @@ function isArticleUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isSocialUrlHost(hostname: string): boolean {
+  return SOCIAL_URL_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+}
+
+function isXUrlHost(hostname: string): boolean {
+  return X_URL_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
 }
 
 function detectLanguage(lowerText: string) {

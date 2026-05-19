@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, LayoutGroup, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { LandingScreen } from './components/LandingScreen';
 import { ProcessingScreen } from './components/ProcessingScreen';
 import { MarketScreen } from './components/MarketScreen';
+import { AgoraBabelTraceMark } from './components/AgoraBabelTraceMark';
 import { sampleArticle } from './sampleArticleData';
 import { DEFAULT_MARKET_SLUG, getMarketPath, getMarketSlugFromPath, getPipelineRunSlug, hydratePipelineRunForSlug, persistCompletedPipelineRun } from './pipeline/artifactStorage';
 import { ApiPipelineProvider, createSubmission, runAgentPipeline, type PipelineRun } from './pipeline';
@@ -10,9 +11,9 @@ import { ApiPipelineProvider, createSubmission, runAgentPipeline, type PipelineR
 export type Screen = 'landing' | 'create' | 'market';
 
 const screenTitles: Record<Screen, string> = {
-  landing: 'Intelligent Workflow',
-  create: 'Source to Artifact',
-  market: 'Final Market Artifact',
+  landing: 'Operational Intelligence',
+  create: 'Source Analysis',
+  market: 'Validated Prediction-Market Artifact',
 };
 
 const screenOrder: Record<Screen, number> = {
@@ -42,21 +43,51 @@ function getPathForScreen(screen: Screen) {
 }
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<Screen>(getInitialScreen);
+  const initialScreen = useMemo(getInitialScreen, []);
+  const [currentScreen, setCurrentScreen] = useState<Screen>(initialScreen);
   const [sourceText, setSourceText] = useState('');
   const [runId, setRunId] = useState(0);
+  const [showSplash, setShowSplash] = useState(initialScreen === 'landing');
+  const [splashSettling, setSplashSettling] = useState(false);
   const [pipelineRun, setPipelineRun] = useState<PipelineRun>(() =>
-    getInitialScreen() === 'market'
+    initialScreen === 'market'
       ? hydratePipelineRunForSlug(getMarketSlugFromPath())
       : runAgentPipeline(createSubmission('')),
   );
   const [transitionDirection, setTransitionDirection] = useState(1);
   const currentScreenRef = useRef(currentScreen);
+  const sampleRunTimerRef = useRef<number | null>(null);
   const reduceMotion = useReducedMotion();
   const apiPipelineProvider = useMemo(() => new ApiPipelineProvider(), []);
 
   useEffect(() => {
     currentScreenRef.current = currentScreen;
+  }, [currentScreen]);
+
+  useEffect(() => {
+    if (!showSplash) {
+      return undefined;
+    }
+
+    const settleTimer = window.setTimeout(() => {
+      setSplashSettling(true);
+    }, reduceMotion ? 450 : 1800);
+    const splashTimer = window.setTimeout(() => {
+      setShowSplash(false);
+      setSplashSettling(false);
+    }, reduceMotion ? 650 : 2300);
+
+    return () => {
+      window.clearTimeout(settleTimer);
+      window.clearTimeout(splashTimer);
+    };
+  }, [reduceMotion, showSplash]);
+
+  useEffect(() => {
+    if (currentScreen !== 'landing') {
+      setShowSplash(false);
+      setSplashSettling(false);
+    }
   }, [currentScreen]);
 
   useEffect(() => {
@@ -92,20 +123,26 @@ export default function App() {
   };
 
   const handleOpenFinalArtifact = () => {
+    if (pipelineRun.status !== 'complete' || !pipelineRun.acceptedMarket) {
+      return;
+    }
+
     const slug = pipelineRun.sourceInput === sampleArticle.sourceText ? DEFAULT_MARKET_SLUG : getPipelineRunSlug(pipelineRun);
     const path = getMarketPath(slug);
     persistCompletedPipelineRun(pipelineRun, slug);
-    const hydratedRun = pipelineRun.status === 'complete' && pipelineRun.acceptedMarket
-      ? pipelineRun
-      : hydratePipelineRunForSlug(slug);
 
-    setPipelineRun(hydratedRun);
+    setPipelineRun(pipelineRun);
     window.history.pushState({}, '', path);
     setTransitionDirection(screenOrder.market >= screenOrder[currentScreenRef.current] ? 1 : -1);
     setCurrentScreen('market');
   };
 
   const handleGenerateMarket = (input: string) => {
+    if (sampleRunTimerRef.current !== null) {
+      window.clearTimeout(sampleRunTimerRef.current);
+      sampleRunTimerRef.current = null;
+    }
+
     const submission = createSubmission(input);
     setSourceText(submission.sourceText);
     setPipelineRun(runAgentPipeline(submission));
@@ -114,6 +151,11 @@ export default function App() {
   };
 
   const handleSourceTextChange = (value: string) => {
+    if (sampleRunTimerRef.current !== null) {
+      window.clearTimeout(sampleRunTimerRef.current);
+      sampleRunTimerRef.current = null;
+    }
+
     setSourceText(value);
 
     if (pipelineRun.status !== 'running' && pipelineRun.status !== 'trace-committed') {
@@ -123,7 +165,33 @@ export default function App() {
   };
 
   const handleRunSampleArticle = () => {
-    handleGenerateMarket(sampleArticle.sourceText);
+    const submission = createSubmission(sampleArticle.sourceText);
+
+    if (sampleRunTimerRef.current !== null) {
+      window.clearTimeout(sampleRunTimerRef.current);
+    }
+
+    setSourceText(submission.sourceText);
+    setPipelineRun(runAgentPipeline(submission));
+    setRunId(0);
+    handleNavigate('create');
+
+    sampleRunTimerRef.current = window.setTimeout(() => {
+      sampleRunTimerRef.current = null;
+      handleGenerateMarket(submission.sourceText);
+    }, 420);
+  };
+
+  const handleNewAnalysis = () => {
+    if (sampleRunTimerRef.current !== null) {
+      window.clearTimeout(sampleRunTimerRef.current);
+      sampleRunTimerRef.current = null;
+    }
+
+    setSourceText('');
+    setPipelineRun(runAgentPipeline(createSubmission('')));
+    setRunId(0);
+    handleNavigate('create');
   };
 
   useEffect(() => {
@@ -167,13 +235,16 @@ export default function App() {
     if (currentScreen === 'market') {
       const hydratedRun = hydratePipelineRunForSlug(getMarketSlugFromPath());
       setPipelineRun(hydratedRun);
-
-      if (!hydratedRun.acceptedMarket && runId === 0) {
-        setSourceText(sampleArticle.sourceText);
-        setRunId((currentRunId) => currentRunId + 1);
-      }
     }
-  }, [currentScreen, runId]);
+  }, [currentScreen]);
+
+  useEffect(() => {
+    return () => {
+      if (sampleRunTimerRef.current !== null) {
+        window.clearTimeout(sampleRunTimerRef.current);
+      }
+    };
+  }, []);
 
   const pageMotion = reduceMotion
     ? {
@@ -191,40 +262,147 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user" transition={screenTransition}>
-      <div className="fixed inset-0 overflow-hidden text-[#191A1C]">
-        <a href="#main-content" className="skip-link">
-          Skip to content
-        </a>
-        <div className="app-shell relative mx-auto flex h-full min-h-0 w-full flex-col overflow-hidden">
-          <div id="main-content" className="relative min-h-0 min-w-0 flex-1 overflow-hidden" tabIndex={-1}>
-            <AnimatePresence initial={false} mode="popLayout" custom={transitionDirection}>
-              <motion.div
-                key={currentScreen}
-                className="absolute inset-0 min-h-0 min-w-0 overflow-hidden"
-                style={{ transformOrigin: '50% 18%' }}
-                {...pageMotion}
-              >
-                {currentScreen === 'landing' && (
-                  <LandingScreen onNavigate={handleNavigate} />
-                )}
-                {currentScreen === 'create' && (
-                  <ProcessingScreen
-                    sourceText={sourceText}
-                    onSourceTextChange={handleSourceTextChange}
-                    runId={runId}
-                    pipelineRun={pipelineRun}
-                    onRunPipeline={handleGenerateMarket}
-                    onNavigate={handleNavigate}
-                    onOpenFinalArtifact={handleOpenFinalArtifact}
-                    onRunSampleArticle={handleRunSampleArticle}
-                  />
-                )}
-                {currentScreen === 'market' && <MarketScreen pipelineRun={pipelineRun} onRunSampleArticle={handleRunSampleArticle} />}
-              </motion.div>
-            </AnimatePresence>
+      <LayoutGroup id="app-shell">
+        <div className="fixed inset-0 overflow-hidden text-[#191A1C]">
+          <a href="#main-content" className="skip-link">
+            Skip to content
+          </a>
+          <div className="app-shell relative mx-auto flex h-full min-h-0 w-full flex-col overflow-hidden">
+            <div id="main-content" className="relative min-h-0 min-w-0 flex-1 overflow-hidden" tabIndex={-1}>
+              <AnimatePresence mode="popLayout" custom={transitionDirection}>
+                <motion.div
+                  key={currentScreen}
+                  className="absolute inset-0 min-h-0 min-w-0 overflow-hidden"
+                  style={{ transformOrigin: '50% 18%' }}
+                  {...pageMotion}
+                >
+                  {currentScreen === 'landing' && (
+                    <LandingScreen
+                      introActive={showSplash}
+                      onNavigate={handleNavigate}
+                      onRunSampleArticle={handleRunSampleArticle}
+                    />
+                  )}
+                  {currentScreen === 'create' && (
+                    <ProcessingScreen
+                      sourceText={sourceText}
+                      onSourceTextChange={handleSourceTextChange}
+                      runId={runId}
+                      pipelineRun={pipelineRun}
+                      onRunPipeline={handleGenerateMarket}
+                      onOpenFinalArtifact={handleOpenFinalArtifact}
+                      onNewAnalysis={handleNewAnalysis}
+                    />
+                  )}
+                  {currentScreen === 'market' && <MarketScreen pipelineRun={pipelineRun} />}
+                </motion.div>
+              </AnimatePresence>
+            </div>
           </div>
+          <AnimatePresence>
+            {showSplash && <SplashScreen settling={splashSettling} />}
+          </AnimatePresence>
         </div>
-      </div>
+      </LayoutGroup>
     </MotionConfig>
+  );
+}
+
+function SplashScreen({ settling }: { settling: boolean }) {
+  const reduceMotion = useReducedMotion();
+  const markRef = useRef<HTMLDivElement>(null);
+  const wordmarkRef = useRef<HTMLDivElement>(null);
+  const [handoffTransform, setHandoffTransform] = useState<{
+    mark: { x: number; y: number; scale: number } | null;
+    wordmark: { x: number; y: number; scale: number } | null;
+  }>({ mark: null, wordmark: null });
+  const traceEase = [0.23, 1, 0.32, 1] as const;
+
+  useLayoutEffect(() => {
+    if (!settling || reduceMotion) {
+      return;
+    }
+
+    const getTransform = (source: HTMLElement | null, targetSelector: string) => {
+      const target = document.querySelector<HTMLElement>(targetSelector);
+
+      if (!source || !target) {
+        return null;
+      }
+
+      const sourceRect = source.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+
+      return {
+        x: targetRect.left - sourceRect.left,
+        y: targetRect.top - sourceRect.top,
+        scale: targetRect.width / sourceRect.width,
+      };
+    };
+
+    setHandoffTransform({
+      mark: getTransform(markRef.current, '[data-agorababel-mark-target]'),
+      wordmark: getTransform(wordmarkRef.current, '[data-agorababel-wordmark-target]'),
+    });
+  }, [reduceMotion, settling]);
+
+  return (
+    <motion.div
+      key="splash"
+      aria-hidden="true"
+      className="fixed inset-0 z-50 grid place-items-center overflow-hidden text-[#171717]"
+      initial={{ opacity: 1 }}
+      animate={settling && !reduceMotion ? { opacity: 1, backgroundColor: 'rgba(247, 246, 241, 0)' } : { opacity: 1, backgroundColor: '#F7F6F1' }}
+      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, filter: 'blur(8px)' }}
+      transition={{ duration: reduceMotion ? 0.2 : 0.4, ease: traceEase }}
+    >
+      <motion.div
+        className="relative grid h-56 w-[min(86vw,42rem)] place-items-center"
+        initial={reduceMotion ? false : { opacity: 1 }}
+        animate={reduceMotion ? undefined : { opacity: 1 }}
+      >
+        {!reduceMotion && (
+          <motion.div
+            ref={markRef}
+            className="absolute top-[calc(50%-5.7rem)] grid size-20 place-items-center rounded-md border border-[#D8D3C8] bg-white text-[#191A1C]"
+            initial={{ opacity: 0, y: 10, scale: 0.9, filter: 'blur(7px)' }}
+            animate={
+              settling && handoffTransform.mark
+                ? { opacity: 1, x: handoffTransform.mark.x, y: handoffTransform.mark.y, scale: handoffTransform.mark.scale, filter: 'blur(0px)' }
+                : { opacity: 1, x: 0, y: 0, scale: 1, filter: 'blur(0px)' }
+            }
+            style={{ transformOrigin: '0 0' }}
+            transition={{
+              duration: settling ? 0.42 : 0.5,
+              delay: settling ? 0 : 0.08,
+              ease: traceEase,
+            }}
+          >
+            <AgoraBabelTraceMark animated className="size-14" />
+          </motion.div>
+        )}
+
+        <motion.div
+          ref={wordmarkRef}
+          className="relative mt-16 text-4xl font-semibold leading-none tracking-normal sm:text-6xl"
+          initial={reduceMotion ? false : { opacity: 0, y: 12, filter: 'blur(8px)' }}
+          animate={
+            reduceMotion
+              ? undefined
+              : settling && handoffTransform.wordmark
+                ? { opacity: 1, x: handoffTransform.wordmark.x, y: handoffTransform.wordmark.y, scale: handoffTransform.wordmark.scale, filter: 'blur(0px)' }
+                : { opacity: 1, x: 0, y: 0, scale: 1, filter: 'blur(0px)' }
+          }
+          style={{ transformOrigin: '0 0' }}
+          transition={{
+            duration: settling ? 0.42 : reduceMotion ? 0 : 0.58,
+            delay: settling || reduceMotion ? 0 : 0.48,
+            ease: traceEase,
+          }}
+        >
+          AgoraBabel
+        </motion.div>
+      </motion.div>
+    </motion.div>
   );
 }

@@ -1,5 +1,5 @@
 import { sampleArticle } from '../sampleArticleData';
-import { createDemoArtifactRun } from './simulatedProvider';
+import { createDemoArtifactRun, createPendingPipelineRun } from './simulatedProvider';
 import type { PipelineRun } from './types';
 
 const STORAGE_PREFIX = 'agorababel:pipelineRun:';
@@ -31,7 +31,10 @@ export function persistCompletedPipelineRun(run: PipelineRun, slug = DEFAULT_MAR
 
 export function hydratePipelineRunForSlug(slug: string): PipelineRun {
   const storedRun = readStoredPipelineRun(slug);
-  return storedRun ?? createDemoArtifactRun();
+  if (storedRun) return storedRun;
+  if (slug === DEFAULT_MARKET_SLUG) return createDemoArtifactRun();
+
+  return createPendingPipelineRun('');
 }
 
 function readStoredPipelineRun(slug: string): PipelineRun | null {

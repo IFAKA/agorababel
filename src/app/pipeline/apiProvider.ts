@@ -27,7 +27,7 @@ export class ApiPipelineProvider implements PipelineProvider {
     let run = createPendingPipelineRun(submission.sourceText, submission);
 
     run = updateRun(run, { status: 'running' });
-    run = appendActivity(run, 'AgoraBabel Orchestrator', 'running', 'Run started from submitted source.', 'The API will validate the source before any market artifact is shown.');
+    run = appendActivity(run, 'Source Analysis', 'running', 'Run started from submitted source.', 'The API will validate the source before any market artifact is shown.');
     yield { type: 'run-started', run };
 
     try {
@@ -83,7 +83,7 @@ export class ApiPipelineProvider implements PipelineProvider {
         const message = analysis.rejectionReason ?? 'The input was rejected because no deadlineable public event could be validated.';
         const brief = createRejectionBrief(message, analysis.criticVerdict.reasoning, submission.sourceText);
         run = updateRun(run, { status: 'failed', error: message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
-        run = appendActivity(run, 'Resolution Critic', 'rejected', message, analysis.criticVerdict.reasoning);
+        run = appendActivity(run, 'Validation Review', 'rejected', message, analysis.criticVerdict.reasoning);
         yield { type: 'run-failed', run, error: message };
         return;
       }
@@ -99,17 +99,17 @@ export class ApiPipelineProvider implements PipelineProvider {
       await paceStage(traceStartedAt);
       run = updateStep(run, 'settlement', 'complete');
       run = updateRun(run, { status: 'trace-committed', trace, analyzedInMs: elapsedMs(startedAt) });
-      run = appendActivity(run, 'Local Trace', 'committed', 'Local trace hash generated. Arc commit pending.', 'The local trace hash fingerprints the validated JSON artifact returned by the API.');
+      run = appendActivity(run, 'Audit Trace', 'committed', 'Trace hash generated from structured analysis outputs.', 'Local audit trace prepared for Arc testnet commit.');
       yield { type: 'step-completed', run, step: run.steps.find((item) => item.id === 'settlement')! };
       yield { type: 'trace-committed', run, trace };
 
       run = updateRun(run, { status: 'complete', analyzedInMs: elapsedMs(startedAt) });
-      run = appendActivity(run, 'Final Output', 'accepted', 'Validated market artifact is ready.', resolvedRun.acceptedMarket.criticReasoning);
+      run = appendActivity(run, 'Artifact Generation', 'accepted', 'Validated market artifact is ready.', resolvedRun.acceptedMarket.criticReasoning);
       yield { type: 'run-completed', run };
     } catch (error) {
       const brief = createPipelineErrorBrief(error, 'orchestrator', submission.sourceText);
       run = updateRun(run, { status: 'failed', error: brief.message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
-      run = appendActivity(run, 'AgoraBabel Orchestrator', 'failed', brief.message, brief.likelyCause);
+      run = appendActivity(run, 'Source Analysis', 'failed', brief.message, brief.likelyCause);
       yield { type: 'run-failed', run, error: brief.message };
     }
   }
@@ -364,12 +364,12 @@ function createPipelineSteps(
   const criticStatus: PipelineStepStatus = accepted ? 'complete' : 'failed';
 
   return [
-    createStep('extraction', 'Extracting Source', 'Source Extraction Agent', analysis.extractedSource ? 'Extract readable article text with the URL reader.' : 'Prepare pasted source text for analysis.', analysis.extractedSource ? `${analysis.extractedSource.title} from ${analysis.extractedSource.domain}.` : 'Raw pasted text accepted for analysis.', analysis.extractedSource ? `Extracted readable article text from ${analysis.extractedSource.domain}.` : 'Prepared pasted source text.', 'complete'),
-    createStep('ingestion', 'Source Scout', 'Source Scout Agent', analysis.extractedSource ? 'Extract readable article text, then parse language, entities, and region.' : 'Parse language, source type, entities, and region.', `${ingestion.language} input with ${ingestion.entities.length} extracted entities.`, `${analysis.extractedSource ? `${analysis.extractedSource.title} / ${analysis.extractedSource.domain}` : ingestion.source}; region ${ingestion.region}.`, 'complete'),
-    createStep('context', 'Signal Analyst', 'Signal Analyst Agent', 'Identify whether the source describes a deadlineable public event.', context.relevanceExplanation, context.englishSummary, 'complete'),
-    createStep('market-creator', 'Market Structurer', 'Market Structurer Agent', 'Draft objective, binary market candidates only when the source supports them.', `${analysis.candidateMarkets.length} candidate market${analysis.candidateMarkets.length === 1 ? '' : 's'} returned by the validated schema.`, analysis.candidateMarkets[0]?.question ?? 'No market candidate survived source validation.', 'complete'),
-    createStep('critic', 'Resolution Critic', 'Resolution Critic Agent', 'Reject weak candidates and approve only clear, public-resolution markets.', analysis.criticVerdict.reasoning, accepted ? 'One market accepted.' : analysis.rejectionReason ?? 'No accepted market.', criticStatus),
-    createStep('settlement', 'Audit Trace', 'Local Trace Agent', 'Package the accepted market with a local trace hash.', 'Arc commit pending.', accepted ? 'Local trace hash pending generation.' : 'Skipped because no market was accepted.', accepted ? 'complete' : 'pending'),
+    createStep('extraction', 'Source Extraction', 'Source Extraction', analysis.extractedSource ? 'Extract readable article text with the URL reader.' : 'Prepare pasted source text for analysis.', analysis.extractedSource ? `${analysis.extractedSource.title} from ${analysis.extractedSource.domain}.` : 'Raw pasted text accepted for analysis.', analysis.extractedSource ? `Extracted readable article text from ${analysis.extractedSource.domain}.` : 'Prepared pasted source text.', 'complete'),
+    createStep('ingestion', 'Source Metadata', 'Source Metadata', analysis.extractedSource ? 'Extract readable article text, then parse language, entities, and region.' : 'Parse language, source type, entities, and region.', `${ingestion.language} input with ${ingestion.entities.length} extracted entities.`, `${analysis.extractedSource ? `${analysis.extractedSource.title} / ${analysis.extractedSource.domain}` : ingestion.source}; region ${ingestion.region}.`, 'complete'),
+    createStep('context', 'Translation & Context', 'Translation & Context', 'Identify whether the source describes a deadlineable public event.', context.relevanceExplanation, context.englishSummary, 'complete'),
+    createStep('market-creator', 'Market Drafting', 'Market Drafting', 'Draft objective, binary market candidates only when the source supports them.', `${analysis.candidateMarkets.length} candidate market${analysis.candidateMarkets.length === 1 ? '' : 's'} returned by the validated schema.`, analysis.candidateMarkets[0]?.question ?? 'No market candidate survived source validation.', 'complete'),
+    createStep('critic', 'Validation Review', 'Validation Review', 'Reject weak candidates and approve only clear, public-resolution markets.', analysis.criticVerdict.reasoning, accepted ? 'One market accepted.' : analysis.rejectionReason ?? 'No accepted market.', criticStatus),
+    createStep('settlement', 'Trace Commit', 'Audit Trace', 'Package the accepted market with a local trace hash.', 'Prepared for Arc testnet commit.', accepted ? 'Trace hash generated from structured analysis outputs.' : 'Skipped because no market was accepted.', accepted ? 'complete' : 'pending'),
   ];
 }
 
@@ -378,8 +378,8 @@ function createExtractionStep(sourceText: string): PipelineStep {
 
   return createStep(
     'extraction',
-    'Extracting Source',
-    'Source Extraction Agent',
+    'Source Extraction',
+    'Source Extraction',
     isUrl ? 'Extract readable article text from the submitted URL.' : 'Prepare pasted source text for analysis.',
     isUrl ? 'Extracting article...' : 'Using the pasted source directly.',
     isUrl ? 'Article extraction pending.' : 'Pasted source prepared.',
@@ -445,7 +445,7 @@ async function createLocalTrace(analysis: AnalysisResult): Promise<ArcTrace> {
 
   return {
     traceHash: `sha256:${traceHash}`,
-    transactionId: 'Arc commit pending',
+    transactionId: 'Prepared for Arc testnet commit',
     network: 'Local trace hash',
     status: 'pending',
     timestamp: new Date().toISOString(),
