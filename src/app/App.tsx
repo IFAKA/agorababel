@@ -487,9 +487,9 @@ function SplashScreen({ settling }: { settling: boolean }) {
     <motion.div
       key="splash"
       aria-hidden="true"
-      className="fixed inset-0 z-50 grid place-items-center overflow-hidden text-[#171717]"
+      className="fixed inset-0 z-50 grid place-items-center overflow-hidden text-[var(--text-strong)]"
       initial={{ opacity: 1 }}
-      animate={settling && !reduceMotion ? { opacity: 1, backgroundColor: 'rgba(247, 246, 241, 0)' } : { opacity: 1, backgroundColor: '#F7F6F1' }}
+      animate={settling && !reduceMotion ? { opacity: 1, backgroundColor: 'transparent' } : { opacity: 1, backgroundColor: 'var(--background)' }}
       exit={reduceMotion ? { opacity: 0 } : { opacity: 0, filter: 'blur(8px)' }}
       transition={{ duration: reduceMotion ? 0.2 : 0.4, ease: traceEase }}
     >
@@ -501,7 +501,7 @@ function SplashScreen({ settling }: { settling: boolean }) {
         {!reduceMotion && (
           <motion.div
             ref={markRef}
-            className="absolute top-[calc(50%-5.7rem)] grid size-20 place-items-center rounded-md border border-[#D8D3C8] bg-white text-[#191A1C]"
+            className="absolute top-[calc(50%-5.7rem)] grid size-20 place-items-center rounded-md border border-[var(--line-soft)] bg-[var(--surface-2)] text-[var(--text-strong)] shadow-[0_18px_54px_var(--shadow-soft)]"
             initial={{ opacity: 0, y: 10, scale: 0.9, filter: 'blur(7px)' }}
             animate={
               settling && handoffTransform.mark

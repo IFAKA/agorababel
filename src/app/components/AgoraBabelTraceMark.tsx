@@ -62,7 +62,7 @@ export function AgoraBabelTraceMark({
         cx="29"
         cy="18"
         r="5.6"
-        fill="#F7F6F1"
+        fill="var(--surface-2)"
         stroke="currentColor"
         strokeWidth="3.4"
         {...(animated ? nodeMotion(0.62) : {})}
@@ -71,7 +71,7 @@ export function AgoraBabelTraceMark({
         cx="36"
         cy="38"
         r="5.6"
-        fill="#F7F6F1"
+        fill="var(--surface-2)"
         stroke="currentColor"
         strokeWidth="3.4"
         {...(animated ? nodeMotion(0.74) : {})}
@@ -80,7 +80,7 @@ export function AgoraBabelTraceMark({
         cx="46"
         cy="32"
         r="6.6"
-        fill="#F7F6F1"
+        fill="var(--surface-2)"
         stroke="currentColor"
         strokeWidth="3.4"
         {...(animated ? nodeMotion(0.86) : {})}
