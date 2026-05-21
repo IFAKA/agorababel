@@ -19,13 +19,12 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   clamp,
-  getCompactOperationDwellMs,
-  getCompactOperationsReadableText,
+  getCompletedStepDwellMs,
   getOneStepPresentationTarget,
-  getStepDwellMs,
+  getStepBriefing,
   type PresentedStepState,
 } from '../pipeline/presentationTiming';
-import type { CriticVerdict, MarketQuestion, OperationEvent, PipelineRun, PipelineStep, PipelineStepStatus, SourceAnalysis } from '../pipeline/types';
+import type { CriticVerdict, MarketQuestion, PipelineRun, PipelineStep, PipelineStepStatus, SourceAnalysis } from '../pipeline/types';
 import { pageContainerClassName } from './pageLayout';
 
 type StepState = 'complete' | 'active' | 'pending' | 'failed';
@@ -1515,13 +1514,15 @@ function StepArtifactFrame({
 }
 
 function StepBrief({ step }: { step: PipelineStep }) {
+  const briefing = getStepBriefing(step);
+  const statusLabel = step.status === 'complete' ? 'What happened' : step.status === 'running' ? 'Now running' : 'Waiting on';
+  const statusValue = step.status === 'complete' ? briefing.happened : step.status === 'running' ? step.reasoningSnippet : step.action;
+
   return (
-    <div className="mt-6 grid gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <ArtifactField label="What this step does" value={step.action} />
-      <ArtifactField
-        label={step.status === 'complete' ? 'Output produced' : step.status === 'running' ? 'Currently doing' : 'Waiting on'}
-        value={step.status === 'complete' ? step.outputSummary : step.reasoningSnippet}
-      />
+    <div className="mt-6 grid gap-4 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 lg:grid-cols-3">
+      <ArtifactField label={statusLabel} value={statusValue} />
+      <ArtifactField label="Why it matters" value={briefing.why} />
+      <ArtifactField label="Next unlocked" value={step.status === 'complete' ? briefing.next : step.outputSummary || briefing.next} />
     </div>
   );
 }
@@ -2223,165 +2224,6 @@ function getNormalizedClaim(ingestion: SourceAnalysis): string {
   }
 
   return `${ingestion.region} may officially confirm ${ingestion.topic.toLowerCase()} before the stated deadline.`;
-}
-
-function getCompletedStepDwellMs(run: PipelineRun, step?: PipelineStep): number {
-  if (step) {
-    const lastOperation = getLastVisibleOperation(run, step.id);
-
-    if (lastOperation) {
-      return getCompactOperationDwellMs(lastOperation);
-    }
-  }
-
-  return getStepDwellMs(getReadableStepText(run, step));
-}
-
-function getLastVisibleOperation(run: PipelineRun, stepId: PipelineStep['id']): OperationEvent | undefined {
-  const operations = run.stepOperations[stepId] ?? [];
-
-  for (let index = operations.length - 1; index >= 0; index -= 1) {
-    const operation = operations[index];
-
-    if (operation.status === 'complete' || operation.status === 'info' || operation.status === 'failed') {
-      return operation;
-    }
-  }
-
-  return operations[operations.length - 1];
-}
-
-function getReadableStepText(run: PipelineRun, step?: PipelineStep): string {
-  if (!step) return '';
-
-  const operationText = getOperationReadableText(run, step.id);
-  const baseText = [
-    step.title,
-    step.action,
-    step.reasoningSnippet,
-    step.outputSummary,
-    operationText,
-  ];
-
-  switch (step.id) {
-    case 'extraction':
-      return [
-        ...baseText,
-        run.extractedSource?.title,
-        run.extractedSource?.domain,
-        looksLikeUrl(run.sourceInput) ? 'Readable URL' : 'Pasted source text',
-        run.extractedSource ? 'Article text extracted' : step.outputSummary,
-        getSourceExcerpt(run),
-      ].filter(Boolean).join(' ');
-    case 'ingestion':
-      return [
-        ...baseText,
-        run.ingestion?.signalName,
-        run.ingestion?.language,
-        run.ingestion?.source,
-        run.ingestion?.topic,
-        run.ingestion?.region,
-        run.ingestion?.sourceDate,
-        run.ingestion?.entities.join(' '),
-      ].filter(Boolean).join(' ');
-    case 'context':
-      return [
-        ...baseText,
-        run.context?.englishSummary,
-        run.context?.marketRelevance,
-        run.context?.relevanceExplanation,
-        run.context?.evidenceSummary,
-      ].filter(Boolean).join(' ');
-    case 'claim':
-      return [
-        ...baseText,
-        run.ingestion?.signalName,
-        run.ingestion?.region,
-        run.ingestion?.topic,
-        run.ingestion?.entities.join(' '),
-        run.context?.relevanceExplanation,
-        run.context?.evidenceSummary,
-      ].filter(Boolean).join(' ');
-    case 'resolver':
-      return [
-        ...baseText,
-        run.liveResolver?.name,
-        run.liveResolver?.url,
-        run.liveResolver?.verificationStatus,
-        run.liveResolver?.verificationEvidence,
-        run.analysis?.resolver?.name,
-        run.analysis?.resolver?.url,
-        run.analysis?.resolver?.verificationEvidence,
-      ].filter(Boolean).join(' ');
-    case 'comparison':
-      return [
-        ...baseText,
-        run.liveMarketComparison?.status,
-        run.liveMarketComparison?.noveltyVerdict,
-        run.liveMarketComparison?.reasoning,
-        run.liveMarketComparison?.similarMarkets.map((market) => `${market.title} ${market.similarity}`).join(' '),
-        run.analysis?.marketComparison?.reasoning,
-      ].filter(Boolean).join(' ');
-    case 'market-creator': {
-      return [
-        ...baseText,
-        ...run.candidateMarkets.flatMap((market) => [
-          market.question,
-          market.evidenceSummary,
-          market.yesCriteria,
-          market.noCriteria,
-          market.deadline,
-          market.resolutionSource,
-        ]),
-        ...run.rejectedMarkets.flatMap((review) => [review.question, review.reasonRejected, review.violatedRule]),
-      ].filter(Boolean).join(' ');
-    }
-    case 'critic':
-      return [
-        ...baseText,
-        run.candidateMarkets.map((draft) => {
-        const review = run.criticReviews.find((item) => item.draftId === draft.id);
-
-        return [
-          draft.question,
-          review?.decision,
-          review?.violatedRule,
-          review?.reasoning,
-          review ? Object.entries(review.checks).map(([label, status]) => `${label} ${status}`).join(' ') : '',
-        ].filter(Boolean).join(' ');
-        }).join(' '),
-      ].filter(Boolean).join(' ');
-    case 'circle':
-      return [
-        ...baseText,
-        run.circleAgentWallet?.status,
-        run.circleAgentWallet?.walletId,
-        run.circleAgentWallet?.address,
-        run.circleAgentWallet?.blockchain,
-      ].filter(Boolean).join(' ');
-    case 'settlement':
-    case 'x402':
-      return [
-        ...baseText,
-        run.acceptedMarket?.question,
-        run.acceptedMarket?.yesCriteria,
-        run.acceptedMarket?.noCriteria,
-        run.acceptedMarket?.deadline,
-        run.acceptedMarket?.resolutionSource,
-        run.acceptedMarket?.evidenceSummary,
-        run.trace?.status,
-        run.trace?.network,
-        run.trace?.traceHash,
-        run.x402?.status,
-        run.x402?.intelligenceUrl,
-      ].filter(Boolean).join(' ');
-    default:
-      return baseText.filter(Boolean).join(' ');
-  }
-}
-
-function getOperationReadableText(run: PipelineRun, stepId: PipelineStep['id']): string {
-  return getCompactOperationsReadableText(run.stepOperations[stepId] ?? []);
 }
 
 function createPresentedSteps(steps: PipelineStep[], presentedStep: PresentedStepState): PipelineStep[] {
