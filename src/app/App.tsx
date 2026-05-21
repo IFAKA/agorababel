@@ -4,7 +4,9 @@ import { LandingScreen } from './components/LandingScreen';
 import { ProcessingScreen, type SubmissionHistoryItem } from './components/ProcessingScreen';
 import { MarketScreen } from './components/MarketScreen';
 import { AgoraBabelTraceMark } from './components/AgoraBabelTraceMark';
+import { ThemeModeControl } from './components/shared/ThemeModeControl';
 import { sampleArticle } from './sampleArticleData';
+import { useThemeMode } from './themeMode';
 import { DEFAULT_MARKET_SLUG, getMarketPath, getMarketSlugFromPath, getPipelineRunSlug, hydratePipelineRunForSlug, persistCompletedPipelineRun } from './pipeline/artifactStorage';
 import { ApiPipelineProvider, createSubmission, runAgentPipeline, SimulatedPipelineProvider, type PipelineProvider, type PipelineRun } from './pipeline';
 
@@ -132,6 +134,7 @@ export default function App() {
   const currentScreenRef = useRef(currentScreen);
   const sampleRunTimerRef = useRef<number | null>(null);
   const reduceMotion = useReducedMotion();
+  const themeMode = useThemeMode();
   const apiPipelineProvider = useMemo(() => new ApiPipelineProvider(), []);
   const demoPipelineProvider = useMemo(() => new SimulatedPipelineProvider(), []);
 
@@ -394,7 +397,7 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user" transition={screenTransition}>
       <LayoutGroup id="app-shell">
-        <div className="fixed inset-0 overflow-hidden text-[#191A1C]">
+        <div className="fixed inset-0 overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
           <a href="#main-content" className="skip-link">
             Skip to content
           </a>
@@ -435,6 +438,7 @@ export default function App() {
           <AnimatePresence>
             {showSplash && <SplashScreen settling={splashSettling} />}
           </AnimatePresence>
+          <ThemeModeControl mode={themeMode.mode} onChange={themeMode.setMode} />
         </div>
       </LayoutGroup>
     </MotionConfig>

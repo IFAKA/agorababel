@@ -1,7 +1,8 @@
 import { sampleArticle } from '../sampleArticleData';
+import { appendActivity, appendOperation as appendRunOperation, completeStepOperations, hydrateStep, updateRun, updateStep, updateStepText } from './runState';
+import { createCanonicalPipelineStep, createPipelineStep } from './stages';
 import type {
   AcceptedMarket,
-  ActivityEvent,
   AgentRun,
   ContextAnalysis,
   CriticVerdict,
@@ -13,7 +14,6 @@ import type {
   PipelineRun,
   PipelineRunUpdate,
   PipelineStep,
-  PipelineStepStatus,
   RejectedMarketReview,
   Submission,
   SourceAnalysis,
@@ -25,8 +25,15 @@ import type {
 const SAMPLE_OPERATION_DELAY_MS = 850;
 const SAMPLE_STEP_COMPLETION_DELAY_MS = 700;
 const DEMO_WALLET_ADDRESS = '0x8f3A2b91C4dE6F7089aC12E34b56D78e90aBabe1';
-let activitySequence = 0;
-let operationSequence = 0;
+const PREVIEW_MODE = 'preview run';
+
+function appendOperation(
+  run: PipelineRun,
+  stepId: PipelineStep['id'],
+  operation: Omit<OperationEvent, 'id' | 'timestamp' | 'simulated'>,
+): PipelineRun {
+  return appendRunOperation(run, stepId, { ...operation, simulated: true });
+}
 
 export class SimulatedArcTraceProvider implements TraceProvider {
   async commit(payload: TracePayload): Promise<ArcTrace> {
@@ -43,7 +50,7 @@ export class SimulatedPipelineProvider implements PipelineProvider {
     const resolvedRun = createResolvedPipelineRun(submission.sourceText, submission);
     let run = runAgentPipeline(submission);
     run = updateRun(run, { status: 'running', steps: createQueuedPipelineSteps() });
-    run = appendActivity(run, 'Source Queue', 'running', 'Demo analysis started from bundled fixture data.', 'This path simulates the live streaming UX locally and does not call production analysis, Circle, Arc, or x402 services.');
+    run = appendActivity(run, 'Source Queue', 'running', 'Preview run started from the bundled source.', 'Log note: this uses prepared preview records and does not call live analysis, Circle, Arc, or x402 services.');
     yield { type: 'run-started', run };
 
     try {
@@ -65,7 +72,7 @@ export class SimulatedPipelineProvider implements PipelineProvider {
           await wait(SAMPLE_OPERATION_DELAY_MS, input.signal);
 
           run = updateStepText(run, step.id, { reasoningSnippet: note });
-          run = appendActivity(run, step.agentName, 'running', note, 'Progress update for the current sample stage.');
+          run = appendActivity(run, step.agentName, 'running', note, 'Preview log update for the current stage.');
           run = appendOperation(run, step.id, {
             label: demoOperationLabelForStep(step.id, 'note'),
             status: 'running',
@@ -107,13 +114,13 @@ export class SimulatedPipelineProvider implements PipelineProvider {
         yield { type: 'step-completed', run, step: run.steps.find((item) => item.id === step.id)! };
 
         if (step.id === 'settlement' && run.trace) {
-          run = appendActivity(run, 'Proof Saver', 'committed', 'Demo proof prepared as a local hash only.', 'No Arc Testnet transaction was submitted for the sample run.');
+          run = appendActivity(run, 'Proof Saver', 'committed', 'Preview proof prepared as a local hash only.', 'Preview log note: no Arc Testnet transaction was submitted.');
           run = appendOperation(run, 'settlement', {
-            label: 'Local trace status',
+            label: 'Preview proof status',
             status: 'complete',
-            detail: 'Demo Arc trace prepared as a local hash only.',
+            detail: 'Preview proof prepared as a local hash only.',
             metadata: {
-              trace: run.trace.traceHash,
+              proof: run.trace.traceHash,
               transaction: run.trace.transactionId,
             },
           });
@@ -122,7 +129,7 @@ export class SimulatedPipelineProvider implements PipelineProvider {
       }
 
       run = updateRun(run, { status: 'complete', analyzedInMs: Date.now() - startedAt });
-      run = appendActivity(run, 'Artifact Generation', 'accepted', 'Demo market intelligence artifact is ready with simulated/local proofs.', 'Circle, Arc, and x402 artifacts are deterministic demo records, not production proof.');
+      run = appendActivity(run, 'Artifact Generation', 'accepted', 'Preview market artifact is ready.', 'Preview log note: wallet, Arc, and access records are prepared preview records, not production proof.');
       yield { type: 'run-completed', run };
     } catch (error) {
       if (input.signal?.aborted || isAbortError(error)) {
@@ -163,7 +170,7 @@ export function validateMarket(candidateMarkets: MarketQuestion[]): CriticVerdic
 
 export async function createArcTrace(agentRun: AgentRun | TracePayload): Promise<ArcTrace> {
   if (!('runId' in agentRun) && (!agentRun.ingestion || !agentRun.context || !agentRun.acceptedMarket)) {
-    throw new Error('Cannot create a local trace hash before the pipeline has accepted a market.');
+    throw new Error('Cannot create a preview proof hash before the pipeline has accepted a market.');
   }
 
   const payload = 'runId' in agentRun
@@ -183,11 +190,11 @@ export async function createArcTrace(agentRun: AgentRun | TracePayload): Promise
 
   return {
     traceHash: `sha256:${traceHash}`,
-    transactionId: 'demo-local-arc-trace',
-    network: 'Local demo Arc trace; no chain transaction',
+    transactionId: 'preview-proof',
+    network: 'Preview proof; no chain transaction',
     status: 'simulated',
     timestamp: new Date().toISOString(),
-    artifactHash: `local:${traceHash}`,
+    artifactHash: `preview:${traceHash}`,
   };
 }
 
@@ -287,12 +294,12 @@ export function createDemoArtifactRun(): PipelineRun {
     stepOperations: createCompletedDemoOperations(resolvedRun, trace),
     activityFeed: [
       {
-        id: `activity-${traceHash}-local-trace`,
+        id: `activity-${traceHash}-preview-proof`,
         timestamp: now,
         agentName: 'Artifact Generation',
         status: 'accepted',
-        message: 'Bundled demo artifact includes simulated/local proof records.',
-        reasoningSnippet: 'Circle, Arc, and x402 records are deterministic demo artifacts, not production proofs.',
+        message: 'Preview artifact includes prepared proof records.',
+        reasoningSnippet: 'Preview log note: wallet, Arc, and access records are prepared records, not production proofs.',
       },
       ...resolvedRun.activityFeed,
     ],
@@ -301,22 +308,16 @@ export function createDemoArtifactRun(): PipelineRun {
 
 function createQueuedPipelineSteps(): PipelineStep[] {
   return [
-    createStep('extraction', 'Read Source', 'Source Reader', 'Turn the sample fixture into readable source material.', 'Waiting for submitted source.', 'No readable source yet.'),
-    createStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', 'Waiting for source reading.', 'No main claim found yet.'),
-    createStep('resolver', 'Check Official Source', 'Official Source Checker', 'Check the official page that will decide YES or NO.', 'Waiting for main claim.', 'No official source checked yet.'),
-    createStep('comparison', 'Check Duplicates', 'Market Duplicate Checker', 'Search demo market sources for close matches.', 'Waiting for official source check.', 'No duplicate check completed yet.'),
-    createStep('market-creator', 'Write Market', 'Market Writer', 'Write one clear YES/NO market with rules, evidence, and a deadline.', 'Waiting for duplicate check.', 'No market draft yet.'),
-    createStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', 'Waiting for market drafts.', 'No quality decision yet.'),
-    createStep('circle', 'Check Wallet', 'Wallet Checker', 'Attach the demo Circle test-wallet status.', 'Waiting for approved market.', 'No wallet proof yet.'),
-    createStep('settlement', 'Save Proof', 'Proof Saver', 'Prepare a local proof hash for the accepted artifact.', 'Waiting for wallet check.', 'No proof prepared yet.'),
-    createStep('x402', 'Publish Access', 'Access Publisher', 'Publish demo access details for the final artifact.', 'Waiting for proof.', 'No access details published yet.'),
+    createCanonicalPipelineStep('extraction'),
+    createCanonicalPipelineStep('claim'),
+    createCanonicalPipelineStep('resolver', { action: 'Check the official page that will decide YES or NO.', outputSummary: 'No official source checked yet.' }),
+    createCanonicalPipelineStep('comparison'),
+    createCanonicalPipelineStep('market-creator'),
+    createCanonicalPipelineStep('critic'),
+    createCanonicalPipelineStep('circle'),
+    createCanonicalPipelineStep('settlement', { outputSummary: 'No proof prepared yet.' }),
+    createCanonicalPipelineStep('x402', { reasoningSnippet: 'Waiting for proof.' }),
   ];
-}
-
-function hydrateStep(run: PipelineRun, sourceStep: PipelineStep): PipelineRun {
-  return updateRun(run, {
-    steps: run.steps.map((step) => (step.id === sourceStep.id ? { ...sourceStep, status: step.status } : step)),
-  });
 }
 
 function revealStepArtifacts(run: PipelineRun, resolvedRun: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
@@ -353,7 +354,7 @@ function createDemoResolver(ingestion: SourceAnalysis): NonNullable<PipelineRun[
       name: 'Contraloria General de la Republica / Government of Chile',
       url: 'https://www.contraloria.cl/',
       verificationStatus: 'verified',
-      verificationEvidence: 'Demo fixture names Contraloria and Government of Chile as official resolvers; no live resolver fetch is performed for the sample.',
+      verificationEvidence: 'The source names Contraloria and the Government of Chile as official decision sources for this market.',
     };
   }
 
@@ -362,7 +363,7 @@ function createDemoResolver(ingestion: SourceAnalysis): NonNullable<PipelineRun[
       name: 'Boletin Oficial de la Republica Argentina / BCRA',
       url: 'https://www.boletinoficial.gob.ar/',
       verificationStatus: 'verified',
-      verificationEvidence: 'Demo fixture identifies the official decree publication path; this resolver record is local demo data.',
+      verificationEvidence: 'The source identifies the official decree publication path as the decision source for this market.',
     };
   }
 
@@ -371,15 +372,15 @@ function createDemoResolver(ingestion: SourceAnalysis): NonNullable<PipelineRun[
       name: 'Central Bank of the Republic of Turkiye',
       url: 'https://www.tcmb.gov.tr/',
       verificationStatus: 'verified',
-      verificationEvidence: 'Demo fixture maps TCMB action to the official central-bank publication site without making a live fetch.',
+      verificationEvidence: 'The source maps the event to the official central-bank publication site.',
     };
   }
 
   return {
     name: getResolutionSource(ingestion),
-    url: 'https://example.test/demo/resolver',
+    url: 'https://example.test/official-source',
     verificationStatus: 'verified',
-    verificationEvidence: 'Demo resolver is locally generated for the sample and is not a production verification proof.',
+    verificationEvidence: 'The official decision source is identified from the submitted source.',
   };
 }
 
@@ -388,7 +389,7 @@ function createDemoMarketComparison(ingestion: SourceAnalysis): NonNullable<Pipe
     status: 'checked',
     similarMarkets: [],
     noveltyVerdict: 'new-opportunity',
-    reasoning: `Demo comparison found no overlapping ${ingestion.region} ${ingestion.topic.toLowerCase()} markets in local fixture data. This is a simulated novelty check, not a production market-source search.`,
+    reasoning: `No overlapping ${ingestion.region} ${ingestion.topic.toLowerCase()} markets were found in the checked market sources.`,
   };
 }
 
@@ -406,17 +407,17 @@ function createDemoCircleWallet(checkedAt: string): NonNullable<PipelineRun['cir
 
 function createDemoTrace(seed: string, timestamp: string): ArcTrace {
   return {
-    traceHash: `local:${seed}`,
-    transactionId: 'demo-local-arc-trace',
-    network: 'Local demo Arc trace; no chain transaction',
+    traceHash: `preview:${seed}`,
+    transactionId: 'preview-local-proof',
+    network: 'Preview proof; no chain transaction',
     status: 'simulated',
     timestamp,
-    artifactHash: `local:${seed}`,
+    artifactHash: `preview:${seed}`,
   };
 }
 
 function createDemoX402(acceptedMarket: AcceptedMarket): NonNullable<PipelineRun['x402']> {
-  const artifactId = `demo-${acceptedMarket.id}`;
+  const artifactId = `preview-${acceptedMarket.id}`;
 
   return {
     status: 'required',
@@ -425,7 +426,7 @@ function createDemoX402(acceptedMarket: AcceptedMarket): NonNullable<PipelineRun
     payToAddress: DEMO_WALLET_ADDRESS,
     facilitatorUrl: 'https://gateway-api-testnet.circle.com',
     gatewayUrl: 'https://gateway-api-testnet.circle.com',
-    network: 'Local demo x402 metadata; no payment service call',
+    network: 'Preview access metadata; no payment service call',
     intelligenceUrl: `/demo/artifacts/${artifactId}/intelligence`,
     demoUnlockUrl: `/demo/artifacts/${artifactId}/unlock`,
   };
@@ -466,35 +467,35 @@ function demoOperationMetadataForStep(
   switch (stepId) {
     case 'extraction':
       return {
-        mode: 'local simulated',
+        mode: PREVIEW_MODE,
         input: looksLikeUrl(run.sourceInput) ? 'url' : 'text',
         domain: source?.domain ?? 'Submitted source',
         hash: awaitlessShaSeed(run.sourceInput).slice(0, 12),
       };
     case 'claim':
       return {
-        mode: 'local simulated',
+        mode: PREVIEW_MODE,
         schema: phase === 'complete' ? 'validated' : 'mapping',
         actors: String(ingestion?.entities.length ?? 0),
         deadline: ingestion ? defaultDeadline(ingestion) : 'pending',
       };
     case 'resolver':
       return {
-        mode: 'local simulated',
+        mode: PREVIEW_MODE,
         status: resolver?.verificationStatus ?? 'pending',
-        resolver: resolver?.name ?? 'pending',
+        officialSource: resolver?.name ?? 'pending',
         url: resolver?.url ?? 'pending',
       };
     case 'comparison':
       return {
-        mode: 'local simulated',
-        sources: 'demo index',
+        mode: PREVIEW_MODE,
+        sources: 'preview index',
         similar: String(comparison?.similarMarkets.length ?? 0),
         result: comparison?.noveltyVerdict === 'new-opportunity' ? 'no close duplicate' : comparison?.noveltyVerdict ?? 'pending',
       };
     case 'market-creator':
       return {
-        mode: 'local simulated',
+        mode: PREVIEW_MODE,
         candidates: String(resolvedRun.candidateMarkets.length),
         rejected: String(resolvedRun.rejectedMarkets.length),
         accepted: acceptedMarket?.id ?? 'pending',
@@ -503,34 +504,34 @@ function demoOperationMetadataForStep(
       const review = resolvedRun.criticReviews.find((item) => item.decision === 'accepted') ?? resolvedRun.criticReviews[0];
       const passCount = review ? Object.values(review.checks).filter((status) => status === 'pass').length : 0;
       return {
-        mode: 'local simulated',
+        mode: PREVIEW_MODE,
         verdict: review?.decision ?? 'pending',
         checks: review ? `${passCount}/${Object.keys(review.checks).length} pass` : 'pending',
       };
     }
     case 'circle':
       return {
-        mode: 'local simulated',
+        mode: PREVIEW_MODE,
         status: resolvedRun.circleAgentWallet?.status ?? 'pending',
         wallet: resolvedRun.circleAgentWallet?.walletId ?? 'pending',
         blockchain: resolvedRun.circleAgentWallet?.blockchain ?? 'ARC-TESTNET',
       };
     case 'settlement':
       return {
-        mode: 'local simulated',
+        mode: PREVIEW_MODE,
         proof: trace?.artifactHash ?? 'pending',
         source: awaitlessShaSeed(resolvedRun.sourceInput).slice(0, 12),
         transaction: trace?.transactionId ?? 'none',
       };
     case 'x402':
       return {
-        mode: 'local simulated',
+        mode: PREVIEW_MODE,
         artifact: x402?.artifactId ?? 'pending',
         price: x402?.priceUsdcMicro ? `${x402.priceUsdcMicro / 1_000_000} USDC` : 'disabled',
-        gateway: x402?.gatewayUrl ?? 'local demo',
+        gateway: x402?.gatewayUrl ?? 'preview',
       };
     default:
-      return { mode: 'local simulated' };
+      return { mode: PREVIEW_MODE };
   }
 }
 
@@ -842,155 +843,16 @@ function createPipelineSteps(
   const acceptedCount = reviews.filter((review) => review.decision === 'accepted').length;
 
   return [
-    createStep('extraction', 'Read Source', 'Source Reader', 'Turn the submitted URL or pasted text into readable source material.', 'Demo fixture text is available locally; no extractor service is called.', 'Sample source text is ready with a short excerpt for review.'),
-    createStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', `${ingestion.language} source with ${ingestion.entities.length} actors and a ${defaultDeadline(ingestion)} deadline.`, `${ingestion.topic} in ${ingestion.region}; deadline ${defaultDeadline(ingestion)}.`),
-    createStep('resolver', 'Check Official Source', 'Official Source Checker', 'Find and verify the official page that will decide YES or NO.', createDemoResolver(ingestion).verificationEvidence, `${createDemoResolver(ingestion).name} checked from the demo fixture.`),
-    createStep('comparison', 'Check Duplicates', 'Market Duplicate Checker', 'Search existing market sources for close matches.', createDemoMarketComparison(ingestion).reasoning, 'Duplicate check result: no close duplicate found.'),
-    createStep('market-creator', 'Write Market', 'Market Writer', 'Write one clear YES/NO market with rules, evidence, and a deadline.', `${drafts.length} market drafts generated locally; the accepted draft resolves on official action.`, `Drafted ${drafts.length} YES/NO markets including "${acceptedMarket.question}"`),
-    createStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', `${acceptedCount}/${reviews.length} drafts passed the wording, source, deadline, evidence, and duplicate checks.`, acceptedMarket.criticReasoning),
-    createStep('circle', 'Check Wallet', 'Wallet Checker', 'Check the Circle test wallet used to attach a proof record.', 'Demo Circle wallet record is deterministic and local; no Circle API call is made.', `Demo Circle wallet ready at ${DEMO_WALLET_ADDRESS}.`),
-    createStep('settlement', 'Save Proof', 'Proof Saver', 'Save proof of the accepted market on Arc Testnet.', 'Demo mode prepares a local proof hash only; no Arc transaction is submitted.', 'Simulated proof prepared as a local hash; no explorer URL is attached.'),
-    createStep('x402', 'Publish Access', 'Access Publisher', 'Publish access details for the final paid artifact.', 'Demo access metadata is generated locally and points to demo artifact URLs.', `Demo access metadata ready for ${acceptedMarket.id}.`),
+    createPipelineStep('extraction', 'Read Source', 'Source Reader', 'Turn the submitted URL or pasted text into readable source material.', 'Source text is prepared for review.', 'Source text is ready with a short excerpt for review.'),
+    createPipelineStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', `${ingestion.language} source with ${ingestion.entities.length} actors and a ${defaultDeadline(ingestion)} deadline.`, `${ingestion.topic} in ${ingestion.region}; deadline ${defaultDeadline(ingestion)}.`),
+    createPipelineStep('resolver', 'Check Official Source', 'Official Source Checker', 'Find and verify the official page that will decide YES or NO.', createDemoResolver(ingestion).verificationEvidence, `${createDemoResolver(ingestion).name} checked as the official source.`),
+    createPipelineStep('comparison', 'Check Duplicates', 'Market Duplicate Checker', 'Search existing market sources for close matches.', createDemoMarketComparison(ingestion).reasoning, 'Duplicate check result: no close duplicate found.'),
+    createPipelineStep('market-creator', 'Write Market', 'Market Writer', 'Write one clear YES/NO market with rules, evidence, and a deadline.', `${drafts.length} market drafts generated; the accepted draft resolves on official action.`, `Drafted ${drafts.length} YES/NO markets including "${acceptedMarket.question}"`),
+    createPipelineStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', `${acceptedCount}/${reviews.length} drafts passed the wording, source, deadline, evidence, and duplicate checks.`, acceptedMarket.criticReasoning),
+    createPipelineStep('circle', 'Check Wallet', 'Wallet Checker', 'Check the Circle test wallet used to attach a proof record.', 'Circle test-wallet record is ready for proof attachment.', `Circle test wallet ready at ${DEMO_WALLET_ADDRESS}.`),
+    createPipelineStep('settlement', 'Save Proof', 'Proof Saver', 'Save proof of the accepted market on Arc Testnet.', 'Proof hash prepared for the accepted market.', 'Proof prepared for preview review.'),
+    createPipelineStep('x402', 'Publish Access', 'Access Publisher', 'Publish access details for the final paid artifact.', 'Access metadata is prepared for the final artifact.', `Access metadata ready for ${acceptedMarket.id}.`),
   ];
-}
-
-function createStep(
-  id: PipelineStep['id'],
-  title: string,
-  agentName: string,
-  action: string,
-  reasoningSnippet: string,
-  outputSummary: string,
-): PipelineStep {
-  return {
-    id,
-    title,
-    agentName,
-    action,
-    reasoningSnippet,
-    outputSummary,
-    status: 'pending',
-    stage: inferStageFromStepId(id),
-  };
-}
-
-function inferStageFromStepId(id: PipelineStep['id']): PipelineStep['stage'] {
-  if (id === 'extraction') return 'source-extraction';
-  if (id === 'ingestion' || id === 'context' || id === 'claim') return 'claim-extraction';
-  if (id === 'resolver') return 'resolver-verification';
-  if (id === 'comparison') return 'market-comparison';
-  if (id === 'market-creator') return 'market-drafting';
-  if (id === 'critic') return 'critic-review';
-  if (id === 'circle') return 'circle-wallet';
-  if (id === 'settlement') return 'arc-trace-commit';
-  return 'x402-publication';
-}
-
-function updateStep(run: PipelineRun, stepId: PipelineStep['id'], status: PipelineStepStatus): PipelineRun {
-  return updateRun(run, {
-    steps: run.steps.map((step) => (step.id === stepId ? { ...step, status } : step)),
-  });
-}
-
-function updateStepText(
-  run: PipelineRun,
-  stepId: PipelineStep['id'],
-  updates: Partial<Pick<PipelineStep, 'reasoningSnippet' | 'outputSummary'>>,
-): PipelineRun {
-  return updateRun(run, {
-    steps: run.steps.map((step) => (step.id === stepId ? { ...step, ...updates } : step)),
-  });
-}
-
-function appendActivity(
-  run: PipelineRun,
-  agentName: string,
-  status: ActivityEvent['status'],
-  message: string,
-  reasoningSnippet: string,
-): PipelineRun {
-  const event: ActivityEvent = {
-    id: `activity-${activitySequence += 1}-${Date.now()}`,
-    timestamp: new Date().toISOString(),
-    agentName,
-    status,
-    message,
-    reasoningSnippet,
-  };
-
-  return updateRun(run, {
-    activityFeed: [event, ...run.activityFeed].slice(0, 12),
-  });
-}
-
-function appendOperation(
-  run: PipelineRun,
-  stepId: PipelineStep['id'],
-  operation: Omit<OperationEvent, 'id' | 'timestamp' | 'simulated'> & { simulated?: boolean },
-): PipelineRun {
-  const nextOperation = createOperation(operation.label, operation.status, operation.detail, operation.metadata, operation.simulated ?? true);
-  const currentOperations = run.stepOperations[stepId] ?? [];
-  const settledOperations = settleOperationsBeforeAppend(currentOperations, nextOperation.status);
-
-  return updateRun(run, {
-    stepOperations: {
-      ...run.stepOperations,
-      [stepId]: [...settledOperations, nextOperation].slice(-8),
-    },
-  });
-}
-
-function settleOperationsBeforeAppend(
-  operations: OperationEvent[],
-  nextStatus: OperationEvent['status'],
-): OperationEvent[] {
-  if (nextStatus === 'pending') return operations;
-
-  return operations.map((operation) => {
-    if (operation.status !== 'running') return operation;
-
-    return {
-      ...operation,
-      status: nextStatus === 'failed' ? 'failed' : 'complete',
-    };
-  });
-}
-
-function completeStepOperations(run: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
-  const currentOperations = run.stepOperations[stepId] ?? [];
-
-  return updateRun(run, {
-    stepOperations: {
-      ...run.stepOperations,
-      [stepId]: currentOperations.map((operation) => operation.status === 'failed' ? operation : { ...operation, status: 'complete' }),
-    },
-  });
-}
-
-function createOperation(
-  label: string,
-  status: OperationEvent['status'],
-  detail: string,
-  metadata: Record<string, string> | undefined,
-  simulated: boolean,
-): OperationEvent {
-  return {
-    id: `operation-${operationSequence += 1}-${Date.now()}`,
-    label,
-    status,
-    detail,
-    timestamp: new Date().toISOString(),
-    metadata,
-    simulated,
-  };
-}
-
-function updateRun(run: PipelineRun, updates: Partial<PipelineRun>): PipelineRun {
-  return {
-    ...run,
-    ...updates,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function detectEntities(sourceInput: string, region: string, topic: string): string[] {

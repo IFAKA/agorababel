@@ -54,9 +54,15 @@
   --surface-3: #FBFAF7;
   --line-soft: #E1DDD3;
   --line-strong: #CFC9BD;
+  --line-muted: #E5E1D8;
   --text-strong: #171717;
   --text-body: #292824;
   --text-subtle: #77746B;
+  --text-link: #305F72;
+  --success: #1F6B43;
+  --warning: #8B5E17;
+  --danger: #8C3D32;
+  --shadow-soft: rgba(29, 28, 24, 0.08);
   --gold: #191A1C;
   --green: #1F6B43;
   --cyan: #315D69;
@@ -65,25 +71,27 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
+  --background: #141414;
+  --foreground: #F1EFE7;
+  --card: #1C1C1D;
+  --card-foreground: #F1EFE7;
+  --popover: #1C1C1D;
+  --popover-foreground: #F1EFE7;
+  --primary: #F1EFE7;
+  --primary-foreground: #141414;
+  --secondary: #252422;
+  --secondary-foreground: #EEEAE0;
+  --muted: #252422;
+  --muted-foreground: #A9A398;
+  --accent: #EEEAE0;
+  --accent-foreground: #141414;
+  --destructive: #D58070;
+  --destructive-foreground: #181615;
+  --border: #34322E;
+  --input: #20201F;
+  --input-background: #20201F;
+  --switch-background: #34322E;
+  --ring: #D7D0C1;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --chart-1: oklch(0.488 0.243 264.376);
@@ -99,6 +107,31 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+  --text-primary: #F1EFE7;
+  --text-secondary: #C9C2B5;
+  --text-muted: #A09A8F;
+  --text-warm: #C9C2B5;
+  --surface: #1C1C1D;
+  --elevated: #222120;
+  --archive-texture: rgba(0, 0, 0, 0.02);
+  --surface-0: #141414;
+  --surface-1: #171716;
+  --surface-2: #1C1C1D;
+  --surface-3: #222120;
+  --line-soft: #34322E;
+  --line-strong: #4A453D;
+  --line-muted: #2C2A27;
+  --text-strong: #F8F5EE;
+  --text-body: #EEEAE0;
+  --text-subtle: #A09A8F;
+  --text-link: #8CB7C4;
+  --success: #8FAE87;
+  --warning: #D2AE6D;
+  --danger: #D58070;
+  --shadow-soft: rgba(0, 0, 0, 0.4);
+  --gold: #D7D0C1;
+  --green: #8FAE87;
+  --cyan: #8CB7C4;
 }
 
 @theme inline {
@@ -151,7 +184,7 @@
     @apply bg-background text-foreground;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     letter-spacing: 0;
-    background: #F7F6F1;
+    background: var(--background);
     text-rendering: geometricPrecision;
   }
 
@@ -279,7 +312,7 @@
   }
 
   .app-shell {
-    background: #F7F6F1;
+    background: var(--background);
     box-shadow: none;
   }
 
@@ -291,22 +324,22 @@
 
   .panel {
     border: 1px solid var(--line-soft);
-    background: #FFFFFF;
+    background: var(--surface-2);
     border-radius: 8px;
-    box-shadow: 0 16px 45px rgba(29, 28, 24, 0.05);
+    box-shadow: 0 16px 45px var(--shadow-soft);
   }
 
   .panel-quiet {
     border: 1px solid var(--line-soft);
-    background: #FBFAF7;
+    background: var(--surface-3);
     border-radius: 8px;
   }
 
   .artifact-card {
     border: 1px solid var(--line-soft);
     border-radius: 8px;
-    background: #FFFFFF;
-    box-shadow: 0 30px 90px rgba(29, 28, 24, 0.08);
+    background: var(--surface-2);
+    box-shadow: 0 30px 90px var(--shadow-soft);
   }
 
   .workflow-page {
@@ -446,27 +479,27 @@
   }
 
   .primary-button {
-    color: #FFFFFF;
-    background: #191A1C;
-    border: 1px solid #191A1C;
+    color: var(--primary-foreground);
+    background: var(--primary);
+    border: 1px solid var(--primary);
     box-shadow: 0 10px 24px rgba(29, 28, 24, 0.12);
   }
 
   .primary-button:hover {
-    background: #000000;
+    background: var(--text-strong);
     box-shadow: 0 12px 28px rgba(29, 28, 24, 0.16);
   }
 
   .secondary-button {
-    color: #292824;
-    background: #FFFFFF;
+    color: var(--text-body);
+    background: var(--surface-2);
     border: 1px solid var(--line-soft);
   }
 
   .secondary-button:hover {
-    color: #171717;
-    border-color: #BEB7AA;
-    background: #FBFAF7;
+    color: var(--text-strong);
+    border-color: var(--line-strong);
+    background: var(--surface-3);
   }
 
   .status-pill {

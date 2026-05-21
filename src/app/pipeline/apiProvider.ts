@@ -1,25 +1,22 @@
 import { AnalysisResultSchema, type AnalysisResult, type PipelineStage } from './analysisSchema';
 import { createPendingPipelineRun, createSubmission } from './simulatedProvider';
+import { appendActivity, appendOperation, compactMetadata, completeStepOperations, failStepOperations, updateRun, updateStep, updateStepText } from './runState';
+import { canonicalStageOrder, labelForStep, stepIdForStage } from './stages';
 import type {
   AcceptedMarket,
-  ActivityEvent,
   ArcTrace,
   ContextAnalysis,
-  OperationEvent,
   PipelineInput,
   PipelineErrorBrief,
   PipelineProvider,
   PipelineRun,
   PipelineRunUpdate,
   PipelineStep,
-  PipelineStepStatus,
   SourceAnalysis,
 } from './types';
 
 const STAGE_PACING_ENABLED = import.meta.env.VITE_DEMO_PACING === 'true';
 const STAGE_MIN_MS = 850;
-let activitySequence = 0;
-let operationSequence = 0;
 
 type StreamEvent =
   | { type: 'run-started'; runId: string }
@@ -30,17 +27,7 @@ type StreamEvent =
   | { type: 'run-completed'; runId: string; analysis: AnalysisResult }
   | { type: 'run-failed'; runId?: string; stage: PipelineErrorBrief['stage']; error: string; likelyCause: string; details?: string[] };
 
-const stageOrder: PipelineStep[] = [
-  createStep('extraction', 'Read Source', 'Source Reader', 'Turn the submitted URL or pasted text into readable source material.', 'Waiting for submitted source.', 'No readable source yet.', 'source-extraction'),
-  createStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', 'Waiting for source reading.', 'No main claim found yet.', 'claim-extraction'),
-  createStep('resolver', 'Check Official Source', 'Official Source Checker', 'Find and verify the official page that will decide YES or NO.', 'Waiting for main claim.', 'No official source found yet.', 'resolver-verification'),
-  createStep('comparison', 'Check Duplicates', 'Market Duplicate Checker', 'Search existing market sources for close matches.', 'Waiting for official source check.', 'No duplicate check completed yet.', 'market-comparison'),
-  createStep('market-creator', 'Write Market', 'Market Writer', 'Write one clear YES/NO market with rules, evidence, and a deadline.', 'Waiting for duplicate check.', 'No market draft yet.', 'market-drafting'),
-  createStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', 'Waiting for market drafts.', 'No quality decision yet.', 'critic-review'),
-  createStep('circle', 'Check Wallet', 'Wallet Checker', 'Check the Circle test wallet used to attach a proof record.', 'Waiting for approved market.', 'No wallet proof yet.', 'circle-wallet'),
-  createStep('settlement', 'Save Proof', 'Proof Saver', 'Save proof of the accepted market on Arc Testnet.', 'Waiting for wallet check.', 'No Arc proof yet.', 'arc-trace-commit'),
-  createStep('x402', 'Publish Access', 'Access Publisher', 'Publish access details for the final paid artifact.', 'Waiting for saved proof.', 'No access details published yet.', 'x402-publication'),
-];
+const stageOrder = canonicalStageOrder;
 
 export class ApiPipelineProvider implements PipelineProvider {
   async *run(input: PipelineInput): AsyncGenerator<PipelineRunUpdate> {
@@ -748,16 +735,6 @@ function parseErrorPayload(payload: unknown) {
   };
 }
 
-function stepIdForStage(stage: PipelineErrorBrief['stage']): PipelineStep['id'] {
-  if (stage === 'resolver-discovery') return 'resolver';
-  const found = stageOrder.find((step) => step.stage === stage);
-  return found?.id ?? 'extraction';
-}
-
-function labelForStep(stepId: PipelineStep['id']) {
-  return stageOrder.find((step) => step.id === stepId)?.agentName ?? 'Pipeline';
-}
-
 function liveOperationLabelForStage(stage: PipelineStage, phase: 'start' | 'note' | 'complete'): string {
   const fallback = phase === 'start' ? 'Stage started' : phase === 'note' ? 'Backend progress' : 'Stage completed';
   const labels: Partial<Record<PipelineStage, Record<typeof phase, string>>> = {
@@ -888,133 +865,6 @@ function liveOperationMetadataForStage(
   return {};
 }
 
-function createStep(
-  id: PipelineStep['id'],
-  title: string,
-  agentName: string,
-  action: string,
-  reasoningSnippet: string,
-  outputSummary: string,
-  stage: PipelineStage,
-): PipelineStep {
-  return { id, title, agentName, action, reasoningSnippet, outputSummary, status: 'pending', stage };
-}
-
-function hydrateStep(run: PipelineRun, sourceStep: PipelineStep): PipelineRun {
-  return updateRun(run, {
-    steps: run.steps.map((step) => (step.id === sourceStep.id ? { ...sourceStep, status: step.status } : step)),
-  });
-}
-
-function revealStepArtifacts(run: PipelineRun, resolvedRun: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
-  if (stepId === 'extraction') return updateRun(run, { extractedSource: resolvedRun.extractedSource });
-  if (stepId === 'claim') return updateRun(run, { ingestion: resolvedRun.ingestion, context: resolvedRun.context });
-  if (stepId === 'resolver') return updateRun(run, { analysis: resolvedRun.analysis });
-  if (stepId === 'comparison') return updateRun(run, { analysis: resolvedRun.analysis });
-  if (stepId === 'market-creator') return updateRun(run, { candidateMarkets: resolvedRun.candidateMarkets, rejectedMarkets: resolvedRun.rejectedMarkets });
-  if (stepId === 'critic') return updateRun(run, { criticReviews: resolvedRun.criticReviews, acceptedMarket: resolvedRun.acceptedMarket });
-  if (stepId === 'circle') return updateRun(run, { circleAgentWallet: resolvedRun.circleAgentWallet });
-  if (stepId === 'settlement') return updateRun(run, { trace: resolvedRun.trace });
-  if (stepId === 'x402') return updateRun(run, { x402: resolvedRun.x402 });
-  return run;
-}
-
-function updateStep(run: PipelineRun, stepId: PipelineStep['id'], status: PipelineStepStatus): PipelineRun {
-  return updateRun(run, {
-    steps: run.steps.map((step) => (step.id === stepId ? { ...step, status } : step)),
-  });
-}
-
-function appendActivity(
-  run: PipelineRun,
-  agentName: string,
-  status: ActivityEvent['status'],
-  message: string,
-  reasoningSnippet: string,
-): PipelineRun {
-  const event: ActivityEvent = {
-    id: `activity-${activitySequence += 1}-${Date.now()}`,
-    timestamp: new Date().toISOString(),
-    agentName,
-    status,
-    message,
-    reasoningSnippet,
-  };
-
-  return updateRun(run, {
-    activityFeed: [event, ...run.activityFeed].slice(0, 12),
-  });
-}
-
-function appendOperation(
-  run: PipelineRun,
-  stepId: PipelineStep['id'],
-  operation: Omit<OperationEvent, 'id' | 'timestamp' | 'simulated'>,
-): PipelineRun {
-  const nextOperation: OperationEvent = {
-    id: `operation-${operationSequence += 1}-${Date.now()}`,
-    timestamp: new Date().toISOString(),
-    simulated: false,
-    ...operation,
-    metadata: compactMetadata(operation.metadata),
-  };
-  const currentOperations = run.stepOperations[stepId] ?? [];
-  const settledOperations = settleOperationsBeforeAppend(currentOperations, nextOperation.status);
-
-  return updateRun(run, {
-    stepOperations: {
-      ...run.stepOperations,
-      [stepId]: [...settledOperations, nextOperation].slice(-8),
-    },
-  });
-}
-
-function settleOperationsBeforeAppend(
-  operations: OperationEvent[],
-  nextStatus: OperationEvent['status'],
-): OperationEvent[] {
-  if (nextStatus === 'pending') return operations;
-
-  return operations.map((operation) => {
-    if (operation.status !== 'running') return operation;
-
-    return {
-      ...operation,
-      status: nextStatus === 'failed' ? 'failed' : 'complete',
-    };
-  });
-}
-
-function completeStepOperations(run: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
-  const currentOperations = run.stepOperations[stepId] ?? [];
-
-  return updateRun(run, {
-    stepOperations: {
-      ...run.stepOperations,
-      [stepId]: currentOperations.map((operation) => operation.status === 'failed' ? operation : { ...operation, status: 'complete' }),
-    },
-  });
-}
-
-function failStepOperations(run: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
-  const currentOperations = run.stepOperations[stepId] ?? [];
-
-  return updateRun(run, {
-    stepOperations: {
-      ...run.stepOperations,
-      [stepId]: currentOperations.map((operation) => operation.status === 'complete' ? operation : { ...operation, status: 'failed' }),
-    },
-  });
-}
-
-function compactMetadata(metadata?: Record<string, string | undefined>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(metadata ?? {})
-      .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0)
-      .map(([key, value]) => [key, value.length > 72 ? `${value.slice(0, 69)}...` : value]),
-  );
-}
-
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
@@ -1023,14 +873,6 @@ function shorten(value?: string, length = 14): string | undefined {
   if (!value) return undefined;
   if (value.length <= length) return value;
   return `${value.slice(0, length)}...`;
-}
-
-function updateRun(run: PipelineRun, updates: Partial<PipelineRun>): PipelineRun {
-  return {
-    ...run,
-    ...updates,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 async function paceStage(stageStartedAt: number) {
