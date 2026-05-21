@@ -426,7 +426,7 @@ function ProgressRail({
 
             return (
               <li key={step.id} className="flex min-w-0 items-center">
-                <span className="inline-flex shrink-0 items-center justify-center py-2">
+                <span className="inline-flex w-[9.5rem] shrink-0 items-center justify-center py-2 sm:w-40">
                   <button
                     type="button"
                     onClick={() => {
@@ -439,7 +439,9 @@ function ProgressRail({
                     disabled={disabled}
                     aria-current={selected ? 'step' : undefined}
                     aria-label={`${step.label}: ${step.description}`}
-                    className={`inline-flex h-10 w-[9.5rem] items-center justify-start gap-2 rounded-full border px-3 text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed sm:w-40 ${
+                    className={`${
+                      selected ? 'inline-flex h-10 w-full justify-start gap-2 px-3' : 'inline-grid size-9 place-items-center'
+                    } items-center rounded-full border text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
                       selected
                         ? 'border-[#171717] bg-[#171717] text-white shadow-[0_0_0_4px_rgba(23,23,23,0.08),0_10px_24px_rgba(29,28,24,0.12)]'
                         : state === 'complete'
@@ -450,7 +452,7 @@ function ProgressRail({
                     }`}
                   >
                     <StepMark state={state} compact selected={selected} />
-                    <span className="min-w-0 truncate text-left leading-5">{step.label}</span>
+                    {selected && <span className="min-w-0 truncate text-left leading-5">{step.label}</span>}
                   </button>
                 </span>
                 {hasConnector && <StepConnector state={state} nextState={nextState} reduceMotion={Boolean(reduceMotion)} />}
