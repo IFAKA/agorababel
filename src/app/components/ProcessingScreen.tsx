@@ -39,11 +39,13 @@ type ProgressStep = {
 };
 type HistoryItem = {
   id: string;
-  label: string;
+  title: string;
   detail: string;
-  status: PipelineStepStatus | 'accepted';
+  status: PipelineRun['status'];
   timestamp?: string;
+  active?: boolean;
 };
+export type SubmissionHistoryItem = HistoryItem;
 type StepTransitionDirection = -1 | 0 | 1;
 type ArtifactView = {
   key: string;
@@ -127,6 +129,8 @@ export function ProcessingScreen({
   onRunPipeline,
   onOpenFinalArtifact,
   onNewAnalysis,
+  submissionHistory,
+  onSelectSubmission,
 }: {
   sourceText: string;
   onSourceTextChange: (value: string) => void;
@@ -135,10 +139,12 @@ export function ProcessingScreen({
   onRunPipeline: (value: string) => void;
   onOpenFinalArtifact: () => void;
   onNewAnalysis: () => void;
+  submissionHistory: SubmissionHistoryItem[];
+  onSelectSubmission: (id: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [errorCopied, setErrorCopied] = useState(false);
-  const [selectedStepId, setSelectedStepId] = useState<PipelineStep['id'] | null>(null);
+  const [selectedStepId, setSelectedStepId] = useState<ProgressStepId | null>(null);
   const [presentedStep, setPresentedStep] = useState<PresentedStepState>({ index: 0, status: 'pending', since: Date.now() });
   const [sourceAcceptedHandoffComplete, setSourceAcceptedHandoffComplete] = useState(false);
   const reduceMotion = useReducedMotion();
@@ -150,7 +156,8 @@ export function ProcessingScreen({
   );
   const runningStep = presentedSteps.find((step) => step.status === 'running' || step.status === 'failed');
   const activeStep = runningStep ?? [...presentedSteps].reverse().find((step) => step.status === 'complete') ?? presentedSteps[0];
-  const selectedStep = selectedStepId ? presentedSteps.find((step) => step.id === selectedStepId && step.status !== 'pending') : undefined;
+  const selectedPipelineStepId = selectedStepId && selectedStepId !== 'source' ? selectedStepId : null;
+  const selectedStep = selectedPipelineStepId ? presentedSteps.find((step) => step.id === selectedPipelineStepId && step.status !== 'pending') : undefined;
   const displayedStep = selectedStep ?? activeStep;
   const displayedStepIndex = displayedStep ? presentedSteps.findIndex((step) => step.id === displayedStep.id) : -1;
   const previousDisplayedStepIndexRef = useRef(displayedStepIndex);
@@ -169,9 +176,9 @@ export function ProcessingScreen({
     {
       id: 'source',
       label: 'Source',
-      description: hasStarted ? 'The submitted source is locked for analysis.' : 'Paste source material and submit it for analysis.',
+      description: hasStarted ? 'Review the exact submitted source for this run.' : 'Paste source material and submit it for analysis.',
       status: hasStarted && !showSourceAccepted ? 'complete' : hasStarted ? 'running' : 'pending',
-      selectable: false,
+      selectable: true,
     },
     ...presentedSteps.map((step) => ({
       id: step.id,
@@ -181,23 +188,16 @@ export function ProcessingScreen({
       selectable: hasStarted && !showSourceAccepted && step.status !== 'pending',
     })),
   ], [hasStarted, presentedSteps, showSourceAccepted]);
-  const selectedProgressStepId: ProgressStepId | undefined = !hasStarted || showSourceAccepted ? 'source' : displayedStep?.id;
+  const selectedProgressStepId: ProgressStepId | undefined = selectedStepId ?? (!hasStarted || showSourceAccepted ? 'source' : displayedStep?.id);
   const handleSelectProgressStep = (stepId: ProgressStepId) => {
-    if (stepId === 'source') return;
+    if (stepId === 'source') {
+      setSelectedStepId('source');
+      return;
+    }
 
     const step = presentedSteps.find((item) => item.id === stepId);
     if (step?.status !== 'pending') setSelectedStepId(stepId);
   };
-  const historyItems = useMemo(
-    () => createHistoryItems({
-      pipelineRun,
-      presentedSteps,
-      sourceText,
-      hasStarted,
-      showSourceAccepted,
-    }),
-    [hasStarted, pipelineRun, presentedSteps, showSourceAccepted, sourceText],
-  );
 
   useEffect(() => {
     setCopied(false);
@@ -285,8 +285,9 @@ export function ProcessingScreen({
             <WorkflowSidebar
               steps={progressSteps}
               selectedStepId={selectedProgressStepId}
-              historyItems={historyItems}
+              historyItems={submissionHistory}
               onSelectStep={handleSelectProgressStep}
+              onSelectHistoryItem={onSelectSubmission}
               onNewAnalysis={onNewAnalysis}
             />
             <PipelineArtifact
@@ -305,7 +306,8 @@ export function ProcessingScreen({
               isComplete={isComplete}
               transitionDirection={!hasStarted || showSourceAccepted || (hasStarted && displayedStepIndex === 0 && presentedStep.status === 'running') ? 1 : stepTransitionDirection}
               showSourceInput={!hasStarted}
-              showSourceAccepted={showSourceAccepted}
+              showSourceAccepted={hasStarted && (showSourceAccepted || selectedStepId === 'source')}
+              sourceHandoffActive={showSourceAccepted}
             />
           </section>
         </div>
@@ -400,12 +402,14 @@ function WorkflowSidebar({
   selectedStepId,
   historyItems,
   onSelectStep,
+  onSelectHistoryItem,
   onNewAnalysis,
 }: {
   steps: ProgressStep[];
   selectedStepId?: ProgressStepId;
   historyItems: HistoryItem[];
   onSelectStep: (stepId: ProgressStepId) => void;
+  onSelectHistoryItem: (id: string) => void;
   onNewAnalysis: () => void;
 }) {
   return (
@@ -425,7 +429,7 @@ function WorkflowSidebar({
         </div>
         <div className="grid gap-6 p-5">
           <VerticalProgressRail steps={steps} selectedStepId={selectedStepId} onSelectStep={onSelectStep} />
-          <RunHistory items={historyItems} />
+          <RunHistory items={historyItems} onSelectItem={onSelectHistoryItem} />
         </div>
       </div>
     </aside>
@@ -543,27 +547,37 @@ function VerticalStepConnector({
   );
 }
 
-function RunHistory({ items }: { items: HistoryItem[] }) {
+function RunHistory({ items, onSelectItem }: { items: HistoryItem[]; onSelectItem: (id: string) => void }) {
   return (
-    <section className="border-t border-[#EEE9DF] pt-5" aria-label="Run history">
+    <section className="border-t border-[#EEE9DF] pt-5" aria-label="Submission history">
       <div className="flex items-center justify-between gap-3">
-        <div className="eyebrow">History</div>
+        <div className="eyebrow">Submissions</div>
         <History aria-hidden="true" size={15} className="text-[#77746B]" />
       </div>
       <div className="mt-4 grid max-h-[34vh] gap-2 overflow-y-auto pr-1 lg:max-h-[42vh]">
         {items.length > 0 ? items.map((item) => (
-          <div key={item.id} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3">
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onSelectItem(item.id)}
+            aria-current={item.active ? 'true' : undefined}
+            className={`rounded-md border p-3 text-left transition-colors duration-200 ${
+              item.active
+                ? 'border-[#171717] bg-white shadow-[0_0_0_3px_rgba(23,23,23,0.06)]'
+                : 'border-[#E5E1D8] bg-[#FBFAF7] hover:border-[#CFC8BA] hover:bg-white'
+            }`}
+          >
             <div className="flex items-start gap-2">
               <HistoryStatusDot status={item.status} />
               <div className="min-w-0">
-                <div className="text-sm font-semibold leading-5 text-[#292824]">{item.label}</div>
+                <div className="text-sm font-semibold leading-5 text-[#292824]">{item.title}</div>
                 <p className="mt-1 text-xs leading-5 text-[#625F57] [overflow-wrap:anywhere]">{item.detail}</p>
                 {item.timestamp && <time className="mt-2 block text-[11px] font-medium text-[#9D998E]" dateTime={item.timestamp}>{formatOperationTime(item.timestamp)}</time>}
               </div>
             </div>
-          </div>
+          </button>
         )) : (
-          <p className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm leading-6 text-[#625F57]">No run history yet.</p>
+          <p className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm leading-6 text-[#625F57]">No submissions yet.</p>
         )}
       </div>
     </section>
@@ -571,7 +585,7 @@ function RunHistory({ items }: { items: HistoryItem[] }) {
 }
 
 function HistoryStatusDot({ status }: { status: HistoryItem['status'] }) {
-  const className = status === 'complete' || status === 'accepted'
+  const className = status === 'complete'
     ? 'bg-[#526247]'
     : status === 'running'
       ? 'bg-[#171717]'
@@ -798,6 +812,7 @@ function PipelineArtifact({
   transitionDirection,
   showSourceInput,
   showSourceAccepted,
+  sourceHandoffActive,
 }: {
   sourceText: string;
   onSourceTextChange: (value: string) => void;
@@ -816,6 +831,7 @@ function PipelineArtifact({
   transitionDirection: StepTransitionDirection;
   showSourceInput: boolean;
   showSourceAccepted: boolean;
+  sourceHandoffActive: boolean;
 }) {
   const reduceMotion = useReducedMotion();
 
@@ -867,7 +883,7 @@ function PipelineArtifact({
   const view = showSourceInput
     ? getSourceInputView({ sourceText, onSourceTextChange, onRunPipeline, sourceReadiness })
     : showSourceAccepted
-      ? getSourceAcceptedView(pipelineRun.sourceInput || sourceText, Boolean(reduceMotion))
+      ? getSourceAcceptedView(pipelineRun.sourceInput || sourceText, Boolean(reduceMotion), sourceHandoffActive)
       : getArtifactView({
           pipelineRun,
           activeStep,
@@ -926,15 +942,19 @@ function getSourceInputView({
   };
 }
 
-function getSourceAcceptedView(sourceText: string, reduceMotion: boolean): ArtifactView {
+function getSourceAcceptedView(sourceText: string, reduceMotion: boolean, handoffActive: boolean): ArtifactView {
   const sourceSummary = getSubmittedSourceSummary(sourceText);
 
   return {
     key: 'source-accepted',
     eyebrow: 'Source',
-    title: 'Source submitted.',
-    description: 'The submitted source is locked and queued for extraction.',
-    icon: <LoaderCircle aria-hidden="true" className={reduceMotion ? '' : 'animate-spin'} size={18} />,
+    title: 'Submitted source.',
+    description: handoffActive
+      ? 'The submitted source is locked and queued for extraction.'
+      : 'This is the exact input attached to the current run.',
+    icon: handoffActive
+      ? <LoaderCircle aria-hidden="true" className={reduceMotion ? '' : 'animate-spin'} size={18} />
+      : <FileText aria-hidden="true" size={18} />,
     body: (
       <>
         <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
@@ -946,10 +966,12 @@ function getSourceAcceptedView(sourceText: string, reduceMotion: boolean): Artif
           </div>
           <p className="mt-3 text-base leading-7 text-[#292824] [overflow-wrap:anywhere]">{sourceSummary.text}</p>
         </StepReveal>
-        <StepReveal index={1} className="mt-5 flex items-center gap-3 rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium text-[#625F57]">
-          <LoaderCircle aria-hidden="true" className={`shrink-0 text-[#292824] ${reduceMotion ? '' : 'animate-spin'}`} size={16} />
-          Source handoff is being prepared for the first analysis agent.
-        </StepReveal>
+        {handoffActive && (
+          <StepReveal index={1} className="mt-5 flex items-center gap-3 rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium text-[#625F57]">
+            <LoaderCircle aria-hidden="true" className={`shrink-0 text-[#292824] ${reduceMotion ? '' : 'animate-spin'}`} size={16} />
+            Source handoff is being prepared for the first analysis agent.
+          </StepReveal>
+        )}
       </>
     ),
   };
@@ -1476,6 +1498,7 @@ function StepArtifactFrame({
                 )}
               </div>
               {description && <p className="mt-5 max-w-2xl text-lg leading-8 text-[#625F57]">{description}</p>}
+              {step && <StepBrief step={step} />}
               {children}
             </div>
             {footer && <div className="border-t border-[#E5E1D8] bg-[#FBFAF7] p-8 sm:p-10">{footer}</div>}
@@ -1488,6 +1511,18 @@ function StepArtifactFrame({
         </AnimatePresence>
       </div>
     </motion.section>
+  );
+}
+
+function StepBrief({ step }: { step: PipelineStep }) {
+  return (
+    <div className="mt-6 grid gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <ArtifactField label="What this step does" value={step.action} />
+      <ArtifactField
+        label={step.status === 'complete' ? 'Output produced' : step.status === 'running' ? 'Currently doing' : 'Waiting on'}
+        value={step.status === 'complete' ? step.outputSummary : step.reasoningSnippet}
+      />
+    </div>
   );
 }
 
@@ -1704,72 +1739,6 @@ type SourceReadiness = {
   tone: 'idle' | 'blocked' | 'ready';
 };
 
-
-function createHistoryItems({
-  pipelineRun,
-  presentedSteps,
-  sourceText,
-  hasStarted,
-  showSourceAccepted,
-}: {
-  pipelineRun: PipelineRun;
-  presentedSteps: PipelineStep[];
-  sourceText: string;
-  hasStarted: boolean;
-  showSourceAccepted: boolean;
-}): HistoryItem[] {
-  const items: HistoryItem[] = [];
-  const submittedSource = pipelineRun.sourceInput || sourceText;
-
-  if (submittedSource.trim()) {
-    const summary = getSubmittedSourceSummary(submittedSource);
-    items.push({
-      id: 'source-submitted',
-      label: hasStarted ? 'Source submitted' : 'Source draft',
-      detail: summary.text || 'Waiting for source material.',
-      status: hasStarted && !showSourceAccepted ? 'complete' : hasStarted ? 'running' : 'pending',
-      timestamp: hasStarted ? pipelineRun.createdAt : undefined,
-    });
-  }
-
-  for (const step of presentedSteps) {
-    if (step.status === 'pending') continue;
-
-    const operations = pipelineRun.stepOperations[step.id] ?? [];
-    const lastOperation = operations.length > 0 ? operations[operations.length - 1] : undefined;
-    const detail = lastOperation?.detail || step.outputSummary || step.reasoningSnippet || step.action;
-
-    items.push({
-      id: `step-${step.id}`,
-      label: stepLabels[step.id],
-      detail: sanitizeOperationText(detail),
-      status: step.status,
-      timestamp: lastOperation?.timestamp,
-    });
-  }
-
-  if (pipelineRun.acceptedMarket) {
-    items.push({
-      id: 'accepted-market',
-      label: 'Artifact accepted',
-      detail: pipelineRun.acceptedMarket.question,
-      status: 'accepted',
-      timestamp: pipelineRun.updatedAt,
-    });
-  }
-
-  if (pipelineRun.error) {
-    items.push({
-      id: 'run-error',
-      label: pipelineRun.errorBrief?.title ?? 'Run stopped',
-      detail: pipelineRun.error,
-      status: 'failed',
-      timestamp: pipelineRun.updatedAt,
-    });
-  }
-
-  return items;
-}
 
 function getSourceReadiness(value: string, isRunning: boolean): SourceReadiness {
   const trimmedValue = value.trim();

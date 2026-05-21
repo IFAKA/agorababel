@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, LayoutGroup, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { LandingScreen } from './components/LandingScreen';
-import { ProcessingScreen } from './components/ProcessingScreen';
+import { ProcessingScreen, type SubmissionHistoryItem } from './components/ProcessingScreen';
 import { MarketScreen } from './components/MarketScreen';
 import { AgoraBabelTraceMark } from './components/AgoraBabelTraceMark';
 import { sampleArticle } from './sampleArticleData';
@@ -66,6 +66,56 @@ function markInitialSplashSeen() {
   }
 }
 
+function createSubmissionHistoryItem(run: PipelineRun, activeRunId: string): SubmissionHistoryItem | null {
+  const source = run.sourceInput || run.submission.sourceText;
+  if (!source.trim()) return null;
+
+  const title = run.acceptedMarket?.question
+    ?? run.ingestion?.signalName
+    ?? getSubmissionTitle(source);
+  const detail = run.error
+    ? run.error
+    : run.status === 'complete'
+      ? 'Artifact accepted and ready to open.'
+      : run.status === 'running'
+        ? getCurrentRunStepLabel(run)
+        : getSubmittedSourceSummary(source);
+
+  return {
+    id: run.submission.id,
+    title,
+    detail,
+    status: run.status,
+    timestamp: run.updatedAt || run.submission.submittedAt,
+    active: run.id === activeRunId,
+  };
+}
+
+function getSubmissionTitle(source: string) {
+  const trimmed = source.trim();
+  try {
+    const url = new URL(trimmed);
+    return url.hostname.replace(/^www\./, '');
+  } catch {
+    return trimmed.replace(/\s+/g, ' ').slice(0, 72) || 'Submitted source';
+  }
+}
+
+function getSubmittedSourceSummary(source: string) {
+  const compact = source.trim().replace(/\s+/g, ' ');
+  return compact.length > 118 ? `${compact.slice(0, 118)}...` : compact;
+}
+
+function getCurrentRunStepLabel(run: PipelineRun) {
+  const runningStep = run.steps.find((step) => step.status === 'running');
+  if (runningStep) return `${runningStep.title} is running.`;
+
+  const completedStep = [...run.steps].reverse().find((step) => step.status === 'complete');
+  if (completedStep) return `${completedStep.title} completed.`;
+
+  return 'Source submitted and queued.';
+}
+
 function getPathForScreen(screen: Screen) {
   if (screen === 'create') return '/create';
   if (screen === 'market') return getMarketPath();
@@ -86,6 +136,7 @@ export default function App() {
   );
   const [transitionDirection, setTransitionDirection] = useState(1);
   const [activePipelineProvider, setActivePipelineProvider] = useState<PipelineProvider | null>(null);
+  const [submissionRuns, setSubmissionRuns] = useState<PipelineRun[]>([]);
   const currentScreenRef = useRef(currentScreen);
   const sampleRunTimerRef = useRef<number | null>(null);
   const reduceMotion = useReducedMotion();
@@ -242,6 +293,22 @@ export default function App() {
     handleNavigate('create');
   };
 
+  const handleSelectSubmission = (submissionId: string) => {
+    const selectedRun = submissionRuns.find((run) => run.submission.id === submissionId);
+    if (!selectedRun) return;
+
+    if (sampleRunTimerRef.current !== null) {
+      window.clearTimeout(sampleRunTimerRef.current);
+      sampleRunTimerRef.current = null;
+    }
+
+    setSourceText(selectedRun.sourceInput || selectedRun.submission.sourceText);
+    setPipelineRun(selectedRun);
+    setActivePipelineProvider(null);
+    setRunId(selectedRun.status === 'idle' ? 0 : 1);
+    handleNavigate('create');
+  };
+
   useEffect(() => {
     if (runId === 0 || !activePipelineProvider) {
       return;
@@ -282,6 +349,22 @@ export default function App() {
   }, [pipelineRun]);
 
   useEffect(() => {
+    if (!pipelineRun.sourceInput.trim() || runId === 0) return;
+
+    setSubmissionRuns((currentRuns) => {
+      const existingIndex = currentRuns.findIndex((run) => run.submission.id === pipelineRun.submission.id);
+      const nextRuns = existingIndex >= 0
+        ? currentRuns.map((run, index) => (index === existingIndex ? pipelineRun : run))
+        : [pipelineRun, ...currentRuns];
+
+      return nextRuns
+        .slice()
+        .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
+        .slice(0, 8);
+    });
+  }, [pipelineRun, runId]);
+
+  useEffect(() => {
     if (currentScreen === 'market') {
       const hydratedRun = hydratePipelineRunForSlug(getMarketSlugFromPath());
       setPipelineRun(hydratedRun);
@@ -309,6 +392,12 @@ export default function App() {
         exit: { opacity: 0, y: transitionDirection > 0 ? -6 : 10, scale: 0.996, filter: 'blur(4px)' },
         transition: screenTransition,
       };
+  const submissionHistory = useMemo(
+    () => submissionRuns
+      .map((run) => createSubmissionHistoryItem(run, pipelineRun.id))
+      .filter((item): item is SubmissionHistoryItem => item !== null),
+    [pipelineRun.id, submissionRuns],
+  );
 
   return (
     <MotionConfig reducedMotion="user" transition={screenTransition}>
@@ -342,6 +431,8 @@ export default function App() {
                       onRunPipeline={handleGenerateMarket}
                       onOpenFinalArtifact={handleOpenFinalArtifact}
                       onNewAnalysis={handleNewAnalysis}
+                      submissionHistory={submissionHistory}
+                      onSelectSubmission={handleSelectSubmission}
                     />
                   )}
                   {currentScreen === 'market' && <MarketScreen pipelineRun={pipelineRun} onBackToWorkflow={handleBackToWorkflow} />}
