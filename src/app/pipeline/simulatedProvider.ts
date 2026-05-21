@@ -24,10 +24,6 @@ import type {
 
 const SAMPLE_OPERATION_DELAY_MS = 850;
 const SAMPLE_STEP_COMPLETION_DELAY_MS = 700;
-const SAMPLE_READING_WORDS_PER_MINUTE = 150;
-const SAMPLE_MIN_STEP_DWELL_MS = 3600;
-const SAMPLE_MAX_STEP_DWELL_MS = 8200;
-const SAMPLE_READING_BUFFER_MS = 900;
 const DEMO_WALLET_ADDRESS = '0x8f3A2b91C4dE6F7089aC12E34b56D78e90aBabe1';
 let activitySequence = 0;
 let operationSequence = 0;
@@ -109,8 +105,6 @@ export class SimulatedPipelineProvider implements PipelineProvider {
           metadata: demoOperationMetadataForStep(step.id, run, resolvedRun, 'complete'),
         });
         yield { type: 'step-completed', run, step: run.steps.find((item) => item.id === step.id)! };
-
-        await wait(getSampleStepDwellMs(step, run, resolvedRun), input.signal);
 
         if (step.id === 'settlement' && run.trace) {
           run = appendActivity(run, 'Arc Committer', 'committed', 'Demo Arc trace prepared as a local hash only.', 'No Arc Testnet transaction was submitted for the sample run.');
@@ -610,100 +604,6 @@ function runningNotesForStep(step: PipelineStep): string[] {
     default:
       return [step.reasoningSnippet];
   }
-}
-
-function getSampleStepDwellMs(step: PipelineStep, run: PipelineRun, resolvedRun: PipelineRun): number {
-  const visibleText = getSampleVisibleStepText(step, run, resolvedRun);
-  const wordCount = countWords(visibleText);
-  const readingMs = (wordCount / SAMPLE_READING_WORDS_PER_MINUTE) * 60_000;
-
-  return Math.round(clamp(readingMs + SAMPLE_READING_BUFFER_MS, SAMPLE_MIN_STEP_DWELL_MS, SAMPLE_MAX_STEP_DWELL_MS));
-}
-
-function getSampleVisibleStepText(step: PipelineStep, run: PipelineRun, resolvedRun: PipelineRun): string {
-  const metadataText = (run.stepOperations[step.id] ?? [])
-    .flatMap((operation) => [
-      operation.label,
-      operation.detail,
-      ...Object.entries(operation.metadata ?? {}).filter(([key]) => key !== 'mode').map(([key, value]) => `${key} ${value}`),
-    ])
-    .join(' ');
-  const baseText = [
-    step.title,
-    step.action,
-    step.reasoningSnippet,
-    step.outputSummary,
-    metadataText,
-  ];
-
-  switch (step.id) {
-    case 'extraction':
-      baseText.push(resolvedRun.extractedSource?.title, resolvedRun.extractedSource?.domain, resolvedRun.extractedSource?.text.slice(0, 420));
-      break;
-    case 'claim':
-      baseText.push(
-        resolvedRun.ingestion?.signalName,
-        resolvedRun.ingestion?.region,
-        resolvedRun.ingestion?.topic,
-        resolvedRun.ingestion?.entities.join(' '),
-        resolvedRun.context?.relevanceExplanation,
-        resolvedRun.context?.evidenceSummary,
-      );
-      break;
-    case 'resolver':
-      baseText.push(resolvedRun.liveResolver?.name, resolvedRun.liveResolver?.url, resolvedRun.liveResolver?.verificationEvidence);
-      break;
-    case 'comparison':
-      baseText.push(
-        resolvedRun.liveMarketComparison?.status,
-        resolvedRun.liveMarketComparison?.noveltyVerdict,
-        resolvedRun.liveMarketComparison?.reasoning,
-        resolvedRun.liveMarketComparison?.similarMarkets.map((market) => `${market.title} ${market.similarity}`).join(' '),
-      );
-      break;
-    case 'market-creator':
-      baseText.push(
-        ...resolvedRun.candidateMarkets.flatMap((market) => [market.question, market.yesCriteria, market.noCriteria, market.deadline, market.resolutionSource, market.evidenceSummary]),
-      );
-      break;
-    case 'critic':
-      baseText.push(
-        ...resolvedRun.criticReviews.flatMap((review) => [review.decision, review.reasoning, Object.entries(review.checks).map(([key, value]) => `${key} ${value}`).join(' ')]),
-      );
-      break;
-    case 'circle':
-      baseText.push(
-        resolvedRun.circleAgentWallet?.status,
-        resolvedRun.circleAgentWallet?.walletId,
-        resolvedRun.circleAgentWallet?.address,
-        resolvedRun.circleAgentWallet?.blockchain,
-      );
-      break;
-    case 'settlement':
-      baseText.push(run.trace?.traceHash, run.trace?.artifactHash, run.trace?.transactionId, run.trace?.network);
-      break;
-    case 'x402':
-      baseText.push(
-        resolvedRun.x402?.artifactId,
-        resolvedRun.x402?.gatewayUrl,
-        resolvedRun.x402?.facilitatorUrl,
-        resolvedRun.x402?.intelligenceUrl,
-        resolvedRun.x402?.demoUnlockUrl,
-      );
-      break;
-    default:
-      break;
-  }
-
-  return baseText.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join(' ');
-}
-
-function countWords(value: string): number {
-  return value.trim().split(/\s+/).filter(Boolean).length;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
 }
 
 function ingestSource(sourceInput: string): SourceAnalysis {

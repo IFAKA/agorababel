@@ -16,15 +16,20 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  clamp,
+  formatOperationStatusLabel,
+  formatOperationMetadataKey,
+  getCompactOperationDwellMs,
+  getCompactOperationsReadableText,
+  getOneStepPresentationTarget,
+  getStepDwellMs,
+  type PresentedStepState,
+} from '../pipeline/presentationTiming';
 import type { CriticVerdict, MarketQuestion, OperationEvent, PipelineRun, PipelineStep, PipelineStepStatus, SourceAnalysis } from '../pipeline/types';
 import { pageContainerClassName } from './pageLayout';
 
 type StepState = 'complete' | 'active' | 'pending' | 'failed';
-type PresentedStepState = {
-  index: number;
-  status: PipelineStepStatus;
-  since: number;
-};
 type ProgressStepId = 'source' | PipelineStep['id'];
 type ProgressStep = {
   id: ProgressStepId;
@@ -104,10 +109,6 @@ const stepDescriptions: Record<PipelineStep['id'], string> = {
 
 const MIN_STEP_PROCESSING_MS = 850;
 const MIN_FAILURE_PROCESSING_MS = 1300;
-const MIN_COMPLETED_STEP_DWELL_MS = 3600;
-const MAX_COMPLETED_STEP_DWELL_MS = 8200;
-const READING_WORDS_PER_MINUTE = 150;
-const CONTENT_REVEAL_BUFFER_MS = 900;
 const MIN_PASTED_SOURCE_LENGTH = 120;
 const SOURCE_ACCEPTED_HANDOFF_MS = 900;
 const SOCIAL_URL_HOSTS = ['facebook.com', 'instagram.com', 'linkedin.com', 'reddit.com', 'tiktok.com', 'x.com', 'twitter.com'];
@@ -219,13 +220,23 @@ export function ProcessingScreen({
       setPresentedStep({ index, status, since: Date.now() });
     };
 
+    if (target.index > presentedStep.index && presentedStep.status !== 'complete') {
+      const currentRawStep = pipelineRun.steps[presentedStep.index];
+
+      if (currentRawStep?.status === 'complete' && areStepOperationsReadyToAdvance(pipelineRun, currentRawStep.id)) {
+        setPresented(presentedStep.index, 'complete');
+        return;
+      }
+    }
+
     if (target.index > presentedStep.index && presentedStep.status === 'complete') {
       const currentStep = pipelineRun.steps[presentedStep.index];
       const remainingDwellMs = Math.max(getCompletedStepDwellMs(pipelineRun, currentStep) - (Date.now() - presentedStep.since), 0);
 
       if (remainingDwellMs > 0) {
         const timeout = window.setTimeout(() => {
-          setPresented(target.index, target.status === 'pending' ? 'running' : target.status);
+          const nextTarget = getOneStepPresentationTarget(pipelineRun, presentedStep, target);
+          setPresented(nextTarget.index, nextTarget.status === 'pending' ? 'running' : nextTarget.status);
         }, remainingDwellMs);
 
         return () => window.clearTimeout(timeout);
@@ -233,7 +244,10 @@ export function ProcessingScreen({
     }
 
     if (presentedStep.index !== target.index || presentedStep.status !== target.status) {
-      setPresented(target.index, target.status === 'pending' ? 'running' : target.status);
+      const nextTarget = target.index > presentedStep.index
+        ? getOneStepPresentationTarget(pipelineRun, presentedStep, target)
+        : target;
+      setPresented(nextTarget.index, nextTarget.status === 'pending' ? 'running' : nextTarget.status);
     }
   }, [hasStarted, pipelineRun, presentedStep, showSourceAccepted]);
 
@@ -397,9 +411,27 @@ function ProgressRail({
     });
   };
   const tooltipStep = tooltip ? steps.find((step) => step.id === tooltip.stepId) : undefined;
+  const selectedIndex = Math.max(steps.findIndex((step) => step.id === selectedStepId), 0);
+  const selectedStep = steps[selectedIndex] ?? steps[0];
 
   return (
     <nav aria-label="Workflow progress" className="relative overflow-visible">
+      {selectedStep && (
+        <div className="mb-3 grid min-h-[4.75rem] gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-[#77746B]">
+                Step {selectedIndex + 1} of {steps.length}
+              </span>
+              <span className={`rounded-sm border px-2 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${progressStatusClassName(selectedStep.status)}`}>
+                {progressStatusLabel(selectedStep.status)}
+              </span>
+            </div>
+            <div className="mt-1 truncate text-base font-semibold leading-6 text-[#171717]">{selectedStep.label}</div>
+            <p className="mt-0.5 line-clamp-2 max-w-3xl text-sm leading-5 text-[#625F57]">{selectedStep.description}</p>
+          </div>
+        </div>
+      )}
       <div className="-mx-6 overflow-x-auto px-6 py-1 sm:-mx-8 sm:px-8 lg:-mx-10 lg:px-10">
         <ol className="flex min-w-max items-center gap-0 sm:min-w-0">
           {steps.map((step, index) => {
@@ -425,9 +457,10 @@ function ProgressRail({
                     disabled={disabled}
                     aria-current={selected ? 'step' : undefined}
                     aria-label={`${step.label}: ${step.description}`}
-                    className={`inline-flex h-9 items-center justify-center gap-2 rounded-full border px-2.5 text-sm font-medium transition-[background-color,border-color,color,box-shadow,width] duration-200 disabled:cursor-not-allowed ${
+                    title={step.label}
+                    className={`inline-grid size-9 place-items-center rounded-full border text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
                       selected
-                        ? 'border-[#171717] bg-[#171717] pr-4 text-white shadow-[0_10px_24px_rgba(29,28,24,0.12)]'
+                        ? 'border-[#171717] bg-[#171717] text-white shadow-[0_0_0_4px_rgba(23,23,23,0.08),0_10px_24px_rgba(29,28,24,0.12)]'
                         : state === 'complete'
                           ? 'border-[#CFC8BA] bg-white text-[#171717] hover:border-[#171717]'
                           : state === 'failed'
@@ -436,7 +469,6 @@ function ProgressRail({
                     }`}
                   >
                     <StepMark state={state} compact selected={selected} />
-                    {selected && <span className="max-w-[11rem] truncate">{step.label}</span>}
                   </button>
                 </span>
                 {hasConnector && <StepConnector state={state} nextState={nextState} reduceMotion={Boolean(reduceMotion)} />}
@@ -457,6 +489,20 @@ function ProgressRail({
       )}
     </nav>
   );
+}
+
+function progressStatusLabel(status: PipelineStepStatus): string {
+  if (status === 'complete') return 'Complete';
+  if (status === 'running') return 'In progress';
+  if (status === 'failed') return 'Needs attention';
+  return 'Queued';
+}
+
+function progressStatusClassName(status: PipelineStepStatus): string {
+  if (status === 'complete') return 'border-[#CFC8BA] bg-white text-[#171717]';
+  if (status === 'running') return 'border-[#171717] bg-[#171717] text-white';
+  if (status === 'failed') return 'border-[#B86A5C] bg-[#FFF9F5] text-[#8C3D32]';
+  return 'border-[#D8D3C8] bg-[#F7F6F1] text-[#77746B]';
 }
 
 function StepConnector({
@@ -1159,7 +1205,7 @@ function getArtifactView({
               )}
               {!traceCommitted && (
                 <p className="mt-4 max-w-3xl text-sm font-medium leading-6 text-[#77746B]">
-                  Trace material is prepared from the structured outputs and will show a transaction link when a chain commit is available.
+                  Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
                 </p>
               )}
               {(activeStep.id === 'x402' && (!pipelineRun.x402 || pipelineRun.x402.status === 'disabled')) && (
@@ -1365,50 +1411,18 @@ function OperationTimeline({
         timestamp: new Date().toISOString(),
         simulated: false,
       } satisfies OperationEvent]).map((operation) => normalizeOperationForStep(operation, stepStatus));
-  const runningOperationId = getRunningOperationId(rows);
-  const runningRowRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!runningOperationId || stepStatus !== 'running') return;
-
-    const row = runningRowRef.current;
-    if (!row) return;
-
-    const rect = row.getBoundingClientRect();
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-    const topPadding = 96;
-    const bottomPadding = 32;
-    const isOutsideViewport = rect.top < topPadding || rect.bottom > viewportHeight - bottomPadding;
-
-    if (isOutsideViewport) {
-      row.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-    }
-  }, [runningOperationId, rows.length, stepStatus]);
 
   return (
     <StepReveal index={4} className="mt-8 border-t border-[#E5E1D8] pt-6">
       <div className="grid gap-2">
         {rows.map((operation, index) => (
           <StepReveal key={operation.id} index={index}>
-            <OperationRow
-              operation={operation}
-              rowRef={operation.id === runningOperationId ? (node) => {
-                runningRowRef.current = node;
-              } : undefined}
-            />
+            <OperationRow operation={operation} />
           </StepReveal>
         ))}
       </div>
     </StepReveal>
   );
-}
-
-function getRunningOperationId(operations: OperationEvent[]): string | null {
-  for (let index = operations.length - 1; index >= 0; index -= 1) {
-    if (operations[index].status === 'running') return operations[index].id;
-  }
-
-  return null;
 }
 
 function normalizeOperationForStep(operation: OperationEvent, stepStatus: PipelineStepStatus): OperationEvent {
@@ -1425,17 +1439,15 @@ function normalizeOperationForStep(operation: OperationEvent, stepStatus: Pipeli
 
 function OperationRow({
   operation,
-  rowRef,
 }: {
   operation: OperationEvent;
-  rowRef?: (node: HTMLDivElement | null) => void;
 }) {
   const metadata = getDisplayMetadata(operation.metadata);
   const label = sanitizeOperationText(operation.label);
-  const detail = sanitizeOperationText(operation.detail);
+  const collapsedMetadata = metadata.slice(0, 2);
 
   return (
-    <div ref={rowRef} className="grid scroll-mt-24 gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 sm:grid-cols-[auto_minmax(0,1fr)]">
+    <div className="grid gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 sm:grid-cols-[auto_minmax(0,1fr)]">
       <div className="flex items-start gap-3">
         <OperationStatusIcon status={operation.status} />
         <time className="mt-0.5 shrink-0 text-xs font-semibold tabular-nums text-[#9D998E]" dateTime={operation.timestamp}>
@@ -1448,17 +1460,12 @@ function OperationRow({
           <span className={`rounded-sm border px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${operationStatusClassName(operation.status)}`}>
             {operationStatusLabel(operation.status)}
           </span>
+          {collapsedMetadata.map(([key, value]) => (
+            <span key={`${operation.id}-compact-${key}`} className="min-w-0 rounded-sm border border-[#E5E1D8] bg-white px-2 py-0.5 text-xs font-medium leading-5 text-[#625F57] [overflow-wrap:anywhere]">
+              <span className="text-[#9D998E]">{formatMetadataKey(key)}:</span> {value}
+            </span>
+          ))}
         </div>
-        <p className="mt-1 text-sm leading-6 text-[#625F57] [overflow-wrap:anywhere]">{detail}</p>
-        {metadata.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {metadata.map(([key, value]) => (
-              <span key={`${operation.id}-${key}`} className="min-w-0 rounded-sm border border-[#E5E1D8] bg-[#FBFAF7] px-2 py-1 text-xs font-medium leading-5 text-[#625F57] [overflow-wrap:anywhere]">
-                <span className="text-[#9D998E]">{formatMetadataKey(key)}:</span> {value}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1477,11 +1484,7 @@ function OperationStatusIcon({ status }: { status: OperationEvent['status'] }) {
 }
 
 function operationStatusLabel(status: OperationEvent['status']): string {
-  if (status === 'complete') return 'Checked';
-  if (status === 'running') return 'Running';
-  if (status === 'failed') return 'Failed';
-  if (status === 'info') return 'Logged';
-  return 'Queued';
+  return formatOperationStatusLabel(status);
 }
 
 function operationStatusClassName(status: OperationEvent['status']): string {
@@ -1498,7 +1501,7 @@ function formatOperationTime(value: string): string {
 }
 
 function formatMetadataKey(value: string): string {
-  return value.replace(/([A-Z])/g, ' $1').replace(/[-_]/g, ' ').trim();
+  return formatOperationMetadataKey(value);
 }
 
 function getDisplayMetadata(metadata?: Record<string, string>): [string, string][] {
@@ -2128,15 +2131,29 @@ function getNormalizedClaim(ingestion: SourceAnalysis): string {
 }
 
 function getCompletedStepDwellMs(run: PipelineRun, step?: PipelineStep): number {
-  const readableText = getReadableStepText(run, step);
-  const wordCount = countWords(readableText);
-  const readingMs = (wordCount / READING_WORDS_PER_MINUTE) * 60_000;
+  if (step) {
+    const lastOperation = getLastVisibleOperation(run, step.id);
 
-  return clamp(
-    Math.round(readingMs + CONTENT_REVEAL_BUFFER_MS),
-    MIN_COMPLETED_STEP_DWELL_MS,
-    MAX_COMPLETED_STEP_DWELL_MS,
-  );
+    if (lastOperation) {
+      return getCompactOperationDwellMs(lastOperation);
+    }
+  }
+
+  return getStepDwellMs(getReadableStepText(run, step));
+}
+
+function getLastVisibleOperation(run: PipelineRun, stepId: PipelineStep['id']): OperationEvent | undefined {
+  const operations = run.stepOperations[stepId] ?? [];
+
+  for (let index = operations.length - 1; index >= 0; index -= 1) {
+    const operation = operations[index];
+
+    if (operation.status === 'complete' || operation.status === 'info' || operation.status === 'failed') {
+      return operation;
+    }
+  }
+
+  return operations[operations.length - 1];
 }
 
 function getReadableStepText(run: PipelineRun, step?: PipelineStep): string {
@@ -2269,25 +2286,7 @@ function getReadableStepText(run: PipelineRun, step?: PipelineStep): string {
 }
 
 function getOperationReadableText(run: PipelineRun, stepId: PipelineStep['id']): string {
-  return (run.stepOperations[stepId] ?? [])
-    .flatMap((operation) => [
-      operation.label,
-      operation.detail,
-      operation.status,
-      ...Object.entries(operation.metadata ?? {})
-        .filter(([key]) => key !== 'mode')
-        .map(([key, value]) => `${formatMetadataKey(key)} ${value}`),
-    ])
-    .filter(Boolean)
-    .join(' ');
-}
-
-function countWords(value: string): number {
-  return value.trim().split(/\s+/).filter(Boolean).length;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
+  return getCompactOperationsReadableText(run.stepOperations[stepId] ?? []);
 }
 
 function createPresentedSteps(steps: PipelineStep[], presentedStep: PresentedStepState): PipelineStep[] {
