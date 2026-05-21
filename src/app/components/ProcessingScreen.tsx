@@ -411,8 +411,6 @@ function ProgressRail({
     });
   };
   const tooltipStep = tooltip ? steps.find((step) => step.id === tooltip.stepId) : undefined;
-  const selectedIndex = Math.max(steps.findIndex((step) => step.id === selectedStepId), 0);
-  const selectedStep = steps[selectedIndex] ?? steps[0];
 
   return (
     <nav aria-label="Workflow progress" className="relative overflow-visible">
@@ -441,8 +439,7 @@ function ProgressRail({
                     disabled={disabled}
                     aria-current={selected ? 'step' : undefined}
                     aria-label={`${step.label}: ${step.description}`}
-                    title={step.label}
-                    className={`inline-grid size-9 place-items-center rounded-full border text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
+                    className={`inline-flex h-10 w-[9.5rem] items-center justify-start gap-2 rounded-full border px-3 text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed sm:w-40 ${
                       selected
                         ? 'border-[#171717] bg-[#171717] text-white shadow-[0_0_0_4px_rgba(23,23,23,0.08),0_10px_24px_rgba(29,28,24,0.12)]'
                         : state === 'complete'
@@ -453,6 +450,7 @@ function ProgressRail({
                     }`}
                   >
                     <StepMark state={state} compact selected={selected} />
+                    <span className="min-w-0 truncate text-left leading-5">{step.label}</span>
                   </button>
                 </span>
                 {hasConnector && <StepConnector state={state} nextState={nextState} reduceMotion={Boolean(reduceMotion)} />}
@@ -461,14 +459,6 @@ function ProgressRail({
           })}
         </ol>
       </div>
-      {selectedStep && (
-        <div className="mt-3 grid min-h-[3.25rem] gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
-          <div className="min-w-0">
-            <div className="truncate text-base font-semibold leading-6 text-[#171717]">{selectedStep.label}</div>
-            <p className="mt-0.5 line-clamp-2 max-w-3xl text-sm leading-5 text-[#625F57]">{selectedStep.description}</p>
-          </div>
-        </div>
-      )}
       {tooltip && tooltipStep && (
         <span
           role="tooltip"
