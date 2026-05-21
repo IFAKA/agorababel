@@ -462,17 +462,9 @@ function ProgressRail({
         </ol>
       </div>
       {selectedStep && (
-        <div className="mt-3 grid min-h-[4.75rem] gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+        <div className="mt-3 grid min-h-[3.25rem] gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-[#77746B]">
-                Step {selectedIndex + 1} of {steps.length}
-              </span>
-              <span className={`rounded-sm border px-2 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${progressStatusClassName(selectedStep.status)}`}>
-                {progressStatusLabel(selectedStep.status)}
-              </span>
-            </div>
-            <div className="mt-1 truncate text-base font-semibold leading-6 text-[#171717]">{selectedStep.label}</div>
+            <div className="truncate text-base font-semibold leading-6 text-[#171717]">{selectedStep.label}</div>
             <p className="mt-0.5 line-clamp-2 max-w-3xl text-sm leading-5 text-[#625F57]">{selectedStep.description}</p>
           </div>
         </div>
@@ -489,20 +481,6 @@ function ProgressRail({
       )}
     </nav>
   );
-}
-
-function progressStatusLabel(status: PipelineStepStatus): string {
-  if (status === 'complete') return 'Complete';
-  if (status === 'running') return 'In progress';
-  if (status === 'failed') return 'Needs attention';
-  return 'Queued';
-}
-
-function progressStatusClassName(status: PipelineStepStatus): string {
-  if (status === 'complete') return 'border-[#CFC8BA] bg-white text-[#171717]';
-  if (status === 'running') return 'border-[#171717] bg-[#171717] text-white';
-  if (status === 'failed') return 'border-[#B86A5C] bg-[#FFF9F5] text-[#8C3D32]';
-  return 'border-[#D8D3C8] bg-[#F7F6F1] text-[#77746B]';
 }
 
 function StepConnector({
