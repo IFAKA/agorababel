@@ -577,7 +577,7 @@ function RunHistory({ items, onSelectItem }: { items: HistoryItem[]; onSelectIte
             </div>
           </button>
         )) : (
-          <p className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm leading-6 text-[#625F57]">No submissions yet.</p>
+          <p className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm leading-6 text-[#625F57]">No completed submissions yet.</p>
         )}
       </div>
     </section>

@@ -68,7 +68,7 @@ function markInitialSplashSeen() {
 
 function createSubmissionHistoryItem(run: PipelineRun, activeRunId: string): SubmissionHistoryItem | null {
   const source = run.sourceInput || run.submission.sourceText;
-  if (!source.trim()) return null;
+  if (!source.trim() || !isFinishedSubmission(run)) return null;
 
   const title = run.acceptedMarket?.question
     ?? run.ingestion?.signalName
@@ -77,9 +77,7 @@ function createSubmissionHistoryItem(run: PipelineRun, activeRunId: string): Sub
     ? run.error
     : run.status === 'complete'
       ? 'Artifact accepted and ready to open.'
-      : run.status === 'running'
-        ? getCurrentRunStepLabel(run)
-        : getSubmittedSourceSummary(source);
+      : getSubmittedSourceSummary(source);
 
   return {
     id: run.submission.id,
@@ -89,6 +87,10 @@ function createSubmissionHistoryItem(run: PipelineRun, activeRunId: string): Sub
     timestamp: run.updatedAt || run.submission.submittedAt,
     active: run.id === activeRunId,
   };
+}
+
+function isFinishedSubmission(run: PipelineRun) {
+  return run.status === 'complete' || run.status === 'failed' || run.status === 'rejected';
 }
 
 function getSubmissionTitle(source: string) {
@@ -104,16 +106,6 @@ function getSubmissionTitle(source: string) {
 function getSubmittedSourceSummary(source: string) {
   const compact = source.trim().replace(/\s+/g, ' ');
   return compact.length > 118 ? `${compact.slice(0, 118)}...` : compact;
-}
-
-function getCurrentRunStepLabel(run: PipelineRun) {
-  const runningStep = run.steps.find((step) => step.status === 'running');
-  if (runningStep) return `${runningStep.title} is running.`;
-
-  const completedStep = [...run.steps].reverse().find((step) => step.status === 'complete');
-  if (completedStep) return `${completedStep.title} completed.`;
-
-  return 'Source submitted and queued.';
 }
 
 function getPathForScreen(screen: Screen) {
