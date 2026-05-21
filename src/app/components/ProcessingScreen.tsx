@@ -882,7 +882,7 @@ function PipelineArtifact({
   const view = showSourceInput
     ? getSourceInputView({ sourceText, onSourceTextChange, onRunPipeline, sourceReadiness })
     : showSourceAccepted
-      ? getSourceAcceptedView(pipelineRun.sourceInput || sourceText, Boolean(reduceMotion), sourceHandoffActive)
+      ? getSourceAcceptedView(pipelineRun, sourceText, Boolean(reduceMotion), sourceHandoffActive)
       : getArtifactView({
           pipelineRun,
           activeStep,
@@ -941,8 +941,10 @@ function getSourceInputView({
   };
 }
 
-function getSourceAcceptedView(sourceText: string, reduceMotion: boolean, handoffActive: boolean): ArtifactView {
-  const sourceSummary = getSubmittedSourceSummary(sourceText);
+function getSourceAcceptedView(pipelineRun: PipelineRun, fallbackSourceText: string, reduceMotion: boolean, handoffActive: boolean): ArtifactView {
+  const submittedSource = pipelineRun.sourceInput || fallbackSourceText;
+  const sourceSummary = getSubmittedSourceSummary(submittedSource);
+  const extracted = pipelineRun.extractedSource;
 
   return {
     key: 'source-accepted',
@@ -963,10 +965,26 @@ function getSourceAcceptedView(sourceText: string, reduceMotion: boolean, handof
               {sourceSummary.kind}
             </span>
           </div>
-          <p className="mt-3 text-base leading-7 text-[#292824] [overflow-wrap:anywhere]">{sourceSummary.text}</p>
+          <div className="mt-3 max-h-72 overflow-y-auto rounded-md border border-[#E5E1D8] bg-white p-4 text-base leading-7 text-[#292824] [overflow-wrap:anywhere] whitespace-pre-wrap">
+            {sourceSummary.text}
+          </div>
         </StepReveal>
+        {extracted && (
+          <StepReveal index={1} className="mt-5 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="eyebrow">Extracted source text</div>
+              <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
+                {extracted.domain}
+              </span>
+            </div>
+            <div className="mt-3 max-h-96 overflow-y-auto rounded-md border border-[#E5E1D8] bg-white p-4 text-base leading-7 text-[#292824] [overflow-wrap:anywhere] whitespace-pre-wrap">
+              <div className="mb-3 font-medium">{extracted.title}</div>
+              {extracted.text}
+            </div>
+          </StepReveal>
+        )}
         {handoffActive && (
-          <StepReveal index={1} className="mt-5 flex items-center gap-3 rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium text-[#625F57]">
+          <StepReveal index={extracted ? 2 : 1} className="mt-5 flex items-center gap-3 rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium text-[#625F57]">
             <LoaderCircle aria-hidden="true" className={`shrink-0 text-[#292824] ${reduceMotion ? '' : 'animate-spin'}`} size={16} />
             Source handoff is being prepared for the first analysis agent.
           </StepReveal>
@@ -1038,7 +1056,6 @@ function getArtifactView({
                 <p className="mt-3 text-base leading-7 text-[#292824]">{sourceExcerpt}</p>
               </StepReveal>
             )}
-            {extracted && <ExtractedSourcePreview source={extracted} />}
           </>
         ),
       };
@@ -1676,7 +1693,6 @@ function ExtractionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: 
           <p className="mt-3 text-base leading-7 text-[#292824]">{sourceExcerpt}</p>
         </StepReveal>
       )}
-      {extracted && <ExtractedSourcePreview source={extracted} />}
     </StepArtifactFrame>
   );
 }
@@ -1810,28 +1826,6 @@ function parseArticleUrl(value: string): URL | null {
 
 function isSocialUrlHost(hostname: string): boolean {
   return SOCIAL_URL_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
-}
-
-function ExtractedSourcePreview({
-  source,
-}: {
-  source: NonNullable<PipelineRun['extractedSource']>;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="mt-6 border-t border-[#E5E1D8] pt-5">
-      <button type="button" onClick={() => setOpen((value) => !value)} className="secondary-button pressable px-4">
-        {open ? 'Hide extracted source' : 'View extracted source'}
-      </button>
-      {open && (
-        <div className="mt-4 max-h-64 overflow-y-auto rounded-md border border-[#E0DCD2] bg-white p-4 text-sm leading-7 text-[#292824]">
-          <div className="mb-3 font-medium">{source.url}</div>
-          <p className="whitespace-pre-wrap">{source.text}</p>
-        </div>
-      )}
-    </div>
-  );
 }
 
 function DraftArtifact({ market, step, progressRail }: { market?: MarketQuestion; step: PipelineStep; progressRail?: ReactNode }) {
@@ -2189,7 +2183,7 @@ function getSubmittedSourceSummary(sourceText: string): { kind: string; text: st
 
   return {
     kind: 'Pasted text',
-    text: normalizedText.length > 260 ? `${normalizedText.slice(0, 257)}...` : normalizedText,
+    text: sourceText.trim(),
   };
 }
 
