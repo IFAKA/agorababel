@@ -107,7 +107,7 @@ export class SimulatedPipelineProvider implements PipelineProvider {
         yield { type: 'step-completed', run, step: run.steps.find((item) => item.id === step.id)! };
 
         if (step.id === 'settlement' && run.trace) {
-          run = appendActivity(run, 'Arc Committer', 'committed', 'Demo Arc trace prepared as a local hash only.', 'No Arc Testnet transaction was submitted for the sample run.');
+          run = appendActivity(run, 'Proof Saver', 'committed', 'Demo proof prepared as a local hash only.', 'No Arc Testnet transaction was submitted for the sample run.');
           run = appendOperation(run, 'settlement', {
             label: 'Local trace status',
             status: 'complete',
@@ -301,15 +301,15 @@ export function createDemoArtifactRun(): PipelineRun {
 
 function createQueuedPipelineSteps(): PipelineStep[] {
   return [
-    createStep('extraction', 'Source Extraction', 'Source Extractor', 'Extract readable source text from the sample fixture.', 'Waiting for submitted evidence.', 'No source extracted yet.'),
-    createStep('claim', 'Claim Extraction', 'Claim Extractor', 'Extract event claim, actors, source language, evidence snippets, and deadline.', 'Waiting for source extraction.', 'No claim extracted yet.'),
-    createStep('resolver', 'Resolver Verification', 'Resolver Verifier', 'Verify the official resolver URL from the fixture.', 'Waiting for claim extraction.', 'No resolver verified yet.'),
-    createStep('comparison', 'Market Comparison', 'Market Scout', 'Check demo market sources for similar existing markets.', 'Waiting for resolver verification.', 'No novelty check completed yet.'),
-    createStep('market-creator', 'Market Drafting', 'Market Drafter', 'Draft one supported candidate and source-specific rejected alternatives.', 'Waiting for market comparison.', 'No market drafted yet.'),
-    createStep('critic', 'Critic Review', 'Critic', 'Enforce binary wording, deadline, official resolver, novelty, and placeholder checks.', 'Waiting for drafted candidates.', 'No critic verdict yet.'),
-    createStep('circle', 'Circle Wallet', 'Circle Wallet Agent', 'Attach deterministic demo Circle ARC-TESTNET wallet status.', 'Waiting for accepted critic verdict.', 'No Circle wallet proof yet.'),
-    createStep('settlement', 'Arc Trace Commit', 'Arc Committer', 'Prepare a local Arc trace hash for the accepted artifact.', 'Waiting for Circle readiness.', 'No Arc trace yet.'),
-    createStep('x402', 'x402 Publication', 'x402 Publisher', 'Publish demo paid-intelligence metadata for agent-to-agent artifact access.', 'Waiting for Arc trace.', 'No x402 publication yet.'),
+    createStep('extraction', 'Read Source', 'Source Reader', 'Turn the sample fixture into readable source material.', 'Waiting for submitted source.', 'No readable source yet.'),
+    createStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', 'Waiting for source reading.', 'No main claim found yet.'),
+    createStep('resolver', 'Check Official Source', 'Official Source Checker', 'Check the official page that will decide YES or NO.', 'Waiting for main claim.', 'No official source checked yet.'),
+    createStep('comparison', 'Check Duplicates', 'Market Duplicate Checker', 'Search demo market sources for close matches.', 'Waiting for official source check.', 'No duplicate check completed yet.'),
+    createStep('market-creator', 'Write Market', 'Market Writer', 'Write one clear YES/NO market with rules, evidence, and a deadline.', 'Waiting for duplicate check.', 'No market draft yet.'),
+    createStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', 'Waiting for market drafts.', 'No quality decision yet.'),
+    createStep('circle', 'Check Wallet', 'Wallet Checker', 'Attach the demo Circle test-wallet status.', 'Waiting for approved market.', 'No wallet proof yet.'),
+    createStep('settlement', 'Save Proof', 'Proof Saver', 'Prepare a local proof hash for the accepted artifact.', 'Waiting for wallet check.', 'No proof prepared yet.'),
+    createStep('x402', 'Publish Access', 'Access Publisher', 'Publish demo access details for the final artifact.', 'Waiting for proof.', 'No access details published yet.'),
   ];
 }
 
@@ -434,16 +434,16 @@ function createDemoX402(acceptedMarket: AcceptedMarket): NonNullable<PipelineRun
 function demoOperationLabelForStep(stepId: PipelineStep['id'], phase: 'start' | 'note' | 'complete'): string {
   const labels: Record<PipelineStep['id'], Record<typeof phase, string>> = {
     extraction: { start: 'Input accepted', note: 'Fixture read', complete: 'Source artifact ready' },
-    ingestion: { start: 'Metadata normalization started', note: 'Metadata fields mapped', complete: 'Source metadata ready' },
-    context: { start: 'Context pass started', note: 'Evidence summarized', complete: 'Context ready' },
-    claim: { start: 'Schema extraction started', note: 'Claim fields mapped', complete: 'Strict claim JSON ready' },
-    resolver: { start: 'Resolver selected', note: 'Official source checked', complete: 'Resolver evidence attached' },
-    comparison: { start: 'Similarity scan started', note: 'Local market index checked', complete: 'Novelty verdict ready' },
-    'market-creator': { start: 'Draft set started', note: 'Alternatives generated', complete: 'Accepted draft selected' },
-    critic: { start: 'Critic checks started', note: 'Rule matrix evaluated', complete: 'Verdict recorded' },
-    circle: { start: 'Wallet record loaded', note: 'ARC-TESTNET fields checked', complete: 'Wallet ready' },
-    settlement: { start: 'Trace payload prepared', note: 'Local hashes computed', complete: 'Local trace prepared' },
-    x402: { start: 'Publication metadata started', note: 'Payment fields staged', complete: 'x402 metadata ready' },
+    ingestion: { start: 'Source details started', note: 'Source fields mapped', complete: 'Source details ready' },
+    context: { start: 'Context summary started', note: 'Evidence summarized', complete: 'Context ready' },
+    claim: { start: 'Claim search started', note: 'Claim fields mapped', complete: 'Main claim ready' },
+    resolver: { start: 'Official source selected', note: 'Official source checked', complete: 'Official source ready' },
+    comparison: { start: 'Duplicate search started', note: 'Local market index checked', complete: 'Duplicate check ready' },
+    'market-creator': { start: 'Market draft started', note: 'Alternatives generated', complete: 'Accepted draft selected' },
+    critic: { start: 'Quality checks started', note: 'Review checks completed', complete: 'Quality decision recorded' },
+    circle: { start: 'Wallet record loaded', note: 'Test wallet fields checked', complete: 'Wallet ready' },
+    settlement: { start: 'Proof payload prepared', note: 'Local hashes computed', complete: 'Local proof prepared' },
+    x402: { start: 'Access details started', note: 'Payment fields staged', complete: 'Access metadata ready' },
   };
 
   return labels[stepId][phase];
@@ -490,7 +490,7 @@ function demoOperationMetadataForStep(
         mode: 'local simulated',
         sources: 'demo index',
         similar: String(comparison?.similarMarkets.length ?? 0),
-        verdict: comparison?.noveltyVerdict ?? 'pending',
+        result: comparison?.noveltyVerdict === 'new-opportunity' ? 'no close duplicate' : comparison?.noveltyVerdict ?? 'pending',
       };
     case 'market-creator':
       return {
@@ -518,7 +518,7 @@ function demoOperationMetadataForStep(
     case 'settlement':
       return {
         mode: 'local simulated',
-        artifact: trace?.artifactHash ?? 'pending',
+        proof: trace?.artifactHash ?? 'pending',
         source: awaitlessShaSeed(resolvedRun.sourceInput).slice(0, 12),
         transaction: trace?.transactionId ?? 'none',
       };
@@ -558,48 +558,48 @@ function runningNotesForStep(step: PipelineStep): string[] {
   switch (step.id) {
     case 'extraction':
       return [
-        'Reading the submitted article content and detecting input shape.',
-        'Computing source fingerprint and preparing the extracted text artifact.',
+        'Reading the submitted article or pasted text.',
+        'Preparing a short source excerpt and proof hash.',
       ];
     case 'claim':
       return [
-        'Mapping actors, event type, quoted evidence, and deadline candidates.',
-        'Validating the structured claim object against the strict schema.',
+        'Finding the actors, event type, quoted evidence, and possible deadline.',
+        'Checking that the main claim has the fields needed for a market.',
       ];
     case 'resolver':
       return [
-        'Selecting the official resolver named by the source evidence.',
-        'Checking resolver URL shape and attaching verification evidence.',
+        'Selecting the official page named by the source evidence.',
+        'Checking that the official page can decide the market outcome.',
       ];
     case 'comparison':
       return [
-        'Searching configured market-source records for overlapping questions.',
-        'Scoring similar market hits and preparing the novelty verdict.',
+        'Searching market sources for overlapping questions.',
+        'Deciding whether this would duplicate an existing market.',
       ];
     case 'market-creator':
       return [
-        'Drafting supported YES/NO candidates from the validated claim.',
-        'Separating accepted framing from weaker rejected alternatives.',
+        'Writing supported YES/NO market drafts from the validated claim.',
+        'Choosing the clearest draft and setting aside weaker alternatives.',
       ];
     case 'critic':
       return [
-        'Checking binary wording, deadline, evidence, resolver, and novelty.',
-        'Recording rejected drafts and confirming the accepted candidate.',
+        'Checking clear YES/NO wording, deadline, evidence, official source, and duplicates.',
+        'Recording rejected drafts and confirming the accepted market.',
       ];
     case 'circle':
       return [
-        'Loading the configured ARC-TESTNET wallet record.',
-        'Checking wallet status, address, wallet ID, and blockchain fields.',
+        'Loading the configured test-wallet record.',
+        'Checking wallet status, address, wallet ID, and network fields.',
       ];
     case 'settlement':
       return [
-        'Hashing the accepted artifact and source evidence.',
-        'Preparing trace metadata and transaction status for the artifact.',
+        'Hashing the accepted market and source evidence.',
+        'Preparing proof metadata and transaction status.',
       ];
     case 'x402':
       return [
-        'Preparing artifact ID, price, gateway, and facilitator metadata.',
-        'Attaching intelligence and unlock URLs for the final artifact.',
+        'Preparing artifact ID, price, payment gateway, and access details.',
+        'Attaching the intelligence and unlock URLs for the final artifact.',
       ];
     default:
       return [step.reasoningSnippet];
@@ -842,15 +842,15 @@ function createPipelineSteps(
   const acceptedCount = reviews.filter((review) => review.decision === 'accepted').length;
 
   return [
-    createStep('extraction', 'Source Extraction', 'Source Extractor', 'Extract readable source text. URL inputs must produce real article text.', 'Demo fixture text is available locally; no extractor service is called.', 'Sample source text prepared with a short excerpt for downstream checks.'),
-    createStep('claim', 'Claim Extraction', 'Claim Extractor', 'Extract event claim, actors, source language, evidence snippets, and deadline.', `${ingestion.language} source with ${ingestion.entities.length} extracted actors and a ${defaultDeadline(ingestion)} deadline.`, `${ingestion.topic} in ${ingestion.region}; deadline ${defaultDeadline(ingestion)}.`),
-    createStep('resolver', 'Resolver Verification', 'Resolver Verifier', 'Fetch and verify the exact official resolver URL.', createDemoResolver(ingestion).verificationEvidence, `${createDemoResolver(ingestion).name} verified from demo fixture.`),
-    createStep('comparison', 'Market Comparison', 'Market Scout', 'Check configured market sources for similar existing markets.', createDemoMarketComparison(ingestion).reasoning, 'Novelty verdict: new-opportunity.'),
-    createStep('market-creator', 'Market Drafting', 'Market Drafter', 'Draft one supported candidate and source-specific rejected alternatives.', `${drafts.length} candidate markets generated locally; the accepted draft resolves on official action.`, `Drafted ${drafts.length} YES/NO candidates including "${acceptedMarket.question}"`),
-    createStep('critic', 'Critic Review', 'Critic', 'Enforce binary wording, deadline, official resolver, novelty, and placeholder checks.', `${acceptedCount}/${reviews.length} candidates accepted after binary, resolver, deadline, evidence, novelty, and placeholder checks.`, acceptedMarket.criticReasoning),
-    createStep('circle', 'Circle Wallet', 'Circle Wallet Agent', 'Verify the configured Circle Developer-Controlled ARC-TESTNET wallet.', 'Demo Circle wallet record is deterministic and local; no Circle API call is made.', `Demo Circle wallet ready at ${DEMO_WALLET_ADDRESS}.`),
-    createStep('settlement', 'Arc Trace Commit', 'Arc Committer', 'Commit the accepted artifact hash to the Arc Testnet trace registry.', 'Demo mode prepares a local trace hash only; no Arc transaction is submitted.', 'Simulated Arc trace prepared as a local hash; no explorer URL is attached.'),
-    createStep('x402', 'x402 Publication', 'x402 Publisher', 'Publish paid intelligence metadata for agent-to-agent artifact access.', 'Demo x402 metadata is generated locally and points to demo artifact URLs.', `Demo x402 publication metadata ready for ${acceptedMarket.id}.`),
+    createStep('extraction', 'Read Source', 'Source Reader', 'Turn the submitted URL or pasted text into readable source material.', 'Demo fixture text is available locally; no extractor service is called.', 'Sample source text is ready with a short excerpt for review.'),
+    createStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', `${ingestion.language} source with ${ingestion.entities.length} actors and a ${defaultDeadline(ingestion)} deadline.`, `${ingestion.topic} in ${ingestion.region}; deadline ${defaultDeadline(ingestion)}.`),
+    createStep('resolver', 'Check Official Source', 'Official Source Checker', 'Find and verify the official page that will decide YES or NO.', createDemoResolver(ingestion).verificationEvidence, `${createDemoResolver(ingestion).name} checked from the demo fixture.`),
+    createStep('comparison', 'Check Duplicates', 'Market Duplicate Checker', 'Search existing market sources for close matches.', createDemoMarketComparison(ingestion).reasoning, 'Duplicate check result: no close duplicate found.'),
+    createStep('market-creator', 'Write Market', 'Market Writer', 'Write one clear YES/NO market with rules, evidence, and a deadline.', `${drafts.length} market drafts generated locally; the accepted draft resolves on official action.`, `Drafted ${drafts.length} YES/NO markets including "${acceptedMarket.question}"`),
+    createStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', `${acceptedCount}/${reviews.length} drafts passed the wording, source, deadline, evidence, and duplicate checks.`, acceptedMarket.criticReasoning),
+    createStep('circle', 'Check Wallet', 'Wallet Checker', 'Check the Circle test wallet used to attach a proof record.', 'Demo Circle wallet record is deterministic and local; no Circle API call is made.', `Demo Circle wallet ready at ${DEMO_WALLET_ADDRESS}.`),
+    createStep('settlement', 'Save Proof', 'Proof Saver', 'Save proof of the accepted market on Arc Testnet.', 'Demo mode prepares a local proof hash only; no Arc transaction is submitted.', 'Simulated proof prepared as a local hash; no explorer URL is attached.'),
+    createStep('x402', 'Publish Access', 'Access Publisher', 'Publish access details for the final paid artifact.', 'Demo access metadata is generated locally and points to demo artifact URLs.', `Demo access metadata ready for ${acceptedMarket.id}.`),
   ];
 }
 

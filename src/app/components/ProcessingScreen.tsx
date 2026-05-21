@@ -87,31 +87,31 @@ const stepContentMotion = {
 };
 
 const stepLabels: Record<PipelineStep['id'], string> = {
-  extraction: 'Source Extraction',
-  claim: 'Claim Extraction',
-  ingestion: 'Source Metadata',
+  extraction: 'Read Source',
+  claim: 'Find Main Claim',
+  ingestion: 'Source Details',
   context: 'Translation & Context',
-  resolver: 'Resolver Verification',
-  comparison: 'Market Comparison',
-  'market-creator': 'Market Drafting',
-  critic: 'Critic Review',
-  circle: 'Circle Wallet',
-  settlement: 'Arc Commit',
-  x402: 'x402 Publication',
+  resolver: 'Check Official Source',
+  comparison: 'Check Duplicates',
+  'market-creator': 'Write Market',
+  critic: 'Quality Check',
+  circle: 'Check Wallet',
+  settlement: 'Save Proof',
+  x402: 'Publish Access',
 };
 
 const stepDescriptions: Record<PipelineStep['id'], string> = {
-  extraction: 'The article or pasted source is prepared.',
-  claim: 'The agent extracts a concrete claim, actors, evidence, and deadline.',
-  ingestion: 'The source is normalized and identified.',
-  context: 'The source is translated and operational context is summarized.',
-  resolver: 'The official resolver URL is fetched and verified.',
-  comparison: 'Existing market sources are searched for close matches.',
-  'market-creator': 'A binary market draft is formed.',
-  critic: 'Weak candidates are rejected against validation checks.',
-  circle: 'The configured ARC-TESTNET Circle wallet is checked.',
-  settlement: 'The accepted artifact hash is committed on Arc Testnet.',
-  x402: 'Paid intelligence access metadata is published.',
+  extraction: 'We turn the submitted URL or pasted text into readable source material.',
+  claim: 'We identify the specific event claim, who is involved, the evidence, and the deadline.',
+  ingestion: 'We label the source language, region, actors, and event type.',
+  context: 'We translate or summarize why the source matters for a market.',
+  resolver: 'We check the official page that will decide whether the market resolves YES or NO.',
+  comparison: 'We search for existing markets so we do not create a duplicate.',
+  'market-creator': 'We write a clear YES/NO market with rules and a deadline.',
+  critic: 'We reject drafts that are vague, duplicated, unsupported, or hard to resolve.',
+  circle: 'We check the test wallet used to attach a proof record.',
+  settlement: 'We save a proof of the accepted market on Arc Testnet.',
+  x402: 'We publish the access details for the final paid artifact.',
 };
 
 const MIN_STEP_PROCESSING_MS = 850;
@@ -175,7 +175,7 @@ export function ProcessingScreen({
     {
       id: 'source',
       label: 'Source',
-      description: hasStarted ? 'Review the exact submitted source for this run.' : 'Paste source material and submit it for analysis.',
+      description: hasStarted ? 'The exact submitted article, URL, or pasted text for this run.' : 'Paste an article URL or source text to start.',
       status: hasStarted && !showSourceAccepted ? 'complete' : hasStarted ? 'running' : 'pending',
       selectable: true,
     },
@@ -1036,7 +1036,7 @@ function getArtifactView({
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: 'Source Extraction',
+        eyebrow: 'Read Source',
         title,
         description,
         icon: <FileText aria-hidden="true" size={18} />,
@@ -1082,9 +1082,9 @@ function getArtifactView({
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: 'Source Metadata',
+        eyebrow: 'Source Details',
         title: ingestion.signalName,
-        description: 'The source is normalized into structured market-intelligence metadata.',
+        description: 'These are the basic facts the market draft will use.',
         icon: <Globe2 aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -1109,9 +1109,9 @@ function getArtifactView({
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: 'Claim Extraction',
+        eyebrow: 'Find Main Claim',
         title: ingestion.signalName,
-        description: context.relevanceExplanation,
+        description: `Main claim found: ${context.relevanceExplanation}`,
         icon: <Languages aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1139,13 +1139,13 @@ function getArtifactView({
           return {
             key: activeStep.id,
             step: activeStep,
-            eyebrow: 'Official Resolver',
+            eyebrow: 'Check Official Source',
             title: discovery?.status === 'found'
-              ? 'Official resolver verification running'
-              : 'Source analyzed, but no official resolver found',
+              ? 'Checking the official source'
+              : 'No official source found',
             description: discovery?.status === 'found'
-              ? `${discovery.candidate?.name ?? 'Resolver candidate'} is being fetched and identity-checked.`
-              : pipelineRun.analysis?.rejectionReason ?? discovery?.reason ?? 'The source did not produce a fetchable official resolver URL.',
+              ? `We are opening ${discovery.candidate?.name ?? 'the official page'} to confirm it can decide the market.`
+              : pipelineRun.analysis?.rejectionReason ?? discovery?.reason ?? 'The source did not include an official page that can decide the outcome.',
             icon: <Globe2 aria-hidden="true" size={18} />,
             body: (
               <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1160,15 +1160,15 @@ function getArtifactView({
           };
         }
 
-        return createPendingArtifactView(activeStep, 'Resolver verification is running.');
+        return createPendingArtifactView(activeStep, 'Checking the official source.');
       }
 
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: 'Official Resolver',
+        eyebrow: 'Check Official Source',
         title: resolver.name,
-        description: resolver.verificationEvidence,
+        description: `This official source can be used to decide the market: ${resolver.verificationEvidence}`,
         icon: <Globe2 aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1178,7 +1178,7 @@ function getArtifactView({
                 <ArtifactField label="Status" value={resolver.verificationStatus} />
               </StepReveal>
               <StepReveal index={1}>
-                <ArtifactField label="Resolver URL" value={resolver.url} />
+                <ArtifactField label="Official source URL" value={resolver.url} />
               </StepReveal>
             </div>
           </div>
@@ -1190,15 +1190,15 @@ function getArtifactView({
       const comparison = pipelineRun.liveMarketComparison ?? pipelineRun.analysis?.marketComparison;
 
       if (!comparison) {
-        return createPendingArtifactView(activeStep, 'Market comparison is checking configured sources.');
+        return createPendingArtifactView(activeStep, 'Checking existing markets for duplicates.');
       }
 
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: 'Market Comparison',
-        title: `Novelty verdict: ${comparison.noveltyVerdict}`,
-        description: comparison.reasoning,
+        eyebrow: 'Check Duplicates',
+        title: comparison.noveltyVerdict === 'new-opportunity' ? 'No close duplicate found' : `Duplicate check: ${comparison.noveltyVerdict}`,
+        description: `Search result: ${comparison.reasoning}`,
         icon: <ListChecks aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1253,15 +1253,15 @@ function getArtifactView({
       const market = pipelineRun.candidateMarkets[0];
 
       if (!market) {
-        return createPendingArtifactView(activeStep, 'Market draft is being formed.');
+        return createPendingArtifactView(activeStep, 'Writing the YES/NO market.');
       }
 
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: 'Market Drafting',
+        eyebrow: 'Write Market',
         title: market.question,
-        description: 'The accepted draft is framed around official action, not media pickup or market reaction.',
+        description: 'This draft asks about an official outcome, so the answer can be checked later.',
         icon: <Link aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2">
@@ -1290,15 +1290,15 @@ function getArtifactView({
 
     case 'critic': {
       if (pipelineRun.candidateMarkets.length === 0) {
-        return createPendingArtifactView(activeStep, 'Candidate review is waiting for drafts.');
+        return createPendingArtifactView(activeStep, 'Quality check is waiting for the market draft.');
       }
 
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: 'Validation Review',
-        title: 'Candidate markets are checked for resolvability.',
-        description: 'The critic accepts only drafts with clear wording, evidence, deadlines, and resolution sources.',
+        eyebrow: 'Quality Check',
+        title: 'Market drafts are checked before approval.',
+        description: 'A draft passes only if the wording is clear, evidence-backed, not duplicated, and easy to resolve.',
         icon: <ListChecks aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-5">
@@ -1337,19 +1337,19 @@ function getArtifactView({
       const traceCommitted = isCommittedTrace(pipelineRun.trace);
 
       if (!market) {
-        return createPendingArtifactView(activeStep, 'Artifact publication is waiting for a validated market.');
+        return createPendingArtifactView(activeStep, 'Proof and publication are waiting for an approved market.');
       }
 
       return {
         key: activeStep.id,
         step: activeStep,
         eyebrow: activeStep.id === 'x402'
-          ? pipelineRun.x402?.status === 'disabled' || !pipelineRun.x402 ? 'x402 Disabled' : 'x402 Publication'
-          : traceCommitted ? 'Arc Trace Commit' : 'Trace Prepared',
+          ? pipelineRun.x402?.status === 'disabled' || !pipelineRun.x402 ? 'Paid Access Disabled' : 'Publish Access'
+          : traceCommitted ? 'Proof Saved' : 'Proof Prepared',
         title: market.question,
         description: traceCommitted
-          ? 'The artifact hash has a live Arc transaction proof.'
-          : 'The artifact hash and source hash are staged for trace review.',
+          ? 'A permanent Arc Testnet proof now points to this final market artifact.'
+          : 'The source and market proof are prepared for review.',
         icon: <ShieldCheck aria-hidden="true" size={18} />,
         body: (
           <StepReveal className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E1D8] pt-6">
@@ -1562,11 +1562,11 @@ function ResolverDiscoveryPanel({
     <StepReveal className="rounded-md border border-[#D8D1C3] bg-[#FBFAF7] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="eyebrow">Resolver Discovery</div>
+          <div className="eyebrow">Official Source Search</div>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#625F57]">
             {discovery.status === 'found'
-              ? 'Official resolver candidates were checked before the verification fetch.'
-              : discovery.reason ?? 'No official resolver candidate survived discovery checks.'}
+              ? 'Official source candidates were checked before opening the final page.'
+              : discovery.reason ?? 'No official source candidate passed the discovery checks.'}
           </p>
         </div>
         <span className={`rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${
@@ -1574,7 +1574,7 @@ function ResolverDiscoveryPanel({
             ? 'border-[#CFC8BA] bg-white text-[#292824]'
             : 'border-[#C58778] bg-[#FFF9F5] text-[#8C3D32]'
         }`}>
-          {discovery.status === 'found' ? 'Candidate selected' : 'No resolver'}
+          {discovery.status === 'found' ? 'Candidate selected' : 'No source'}
         </span>
       </div>
 
@@ -1678,7 +1678,7 @@ function ExtractionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: 
   const sourceExcerpt = getSourceExcerpt(pipelineRun);
 
   return (
-    <StepArtifactFrame eyebrow="Source Extraction" title={title} description={description} step={step} icon={<FileText aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Read Source" title={title} description={description} step={step} icon={<FileText aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-3 sm:grid-cols-2">
         <StepReveal>
           <ArtifactField label="Input type" value={looksLikeUrl(pipelineRun.sourceInput) ? 'Readable URL' : 'Pasted source text'} />
@@ -1701,7 +1701,7 @@ function IngestionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: P
   const ingestion = pipelineRun.ingestion;
 
   if (!ingestion) {
-    return <StepPendingArtifact title="Source metadata is being assembled." description={step.reasoningSnippet} progressRail={progressRail} />;
+    return <StepPendingArtifact title="Source details are being prepared." description={step.reasoningSnippet} progressRail={progressRail} />;
   }
 
   const source = pipelineRun.extractedSource ? `${pipelineRun.extractedSource.title} / ${pipelineRun.extractedSource.domain}` : ingestion.source;
@@ -1716,7 +1716,7 @@ function IngestionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: P
   ];
 
   return (
-    <StepArtifactFrame eyebrow="Source Metadata" title={ingestion.signalName} description="The source is normalized into structured market-intelligence metadata." step={step} icon={<Globe2 aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Source Details" title={ingestion.signalName} description="These are the basic facts the market draft will use." step={step} icon={<Globe2 aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2 lg:grid-cols-3">
         {fields.map(([label, value], index) => (
           <StepReveal key={label} index={index}>
@@ -1830,11 +1830,11 @@ function isSocialUrlHost(hostname: string): boolean {
 
 function DraftArtifact({ market, step, progressRail }: { market?: MarketQuestion; step: PipelineStep; progressRail?: ReactNode }) {
   if (!market) {
-    return <StepPendingArtifact title="Market draft is being formed." description={step.reasoningSnippet} progressRail={progressRail} />;
+    return <StepPendingArtifact title="Writing the YES/NO market." description={step.reasoningSnippet} progressRail={progressRail} />;
   }
 
   return (
-    <StepArtifactFrame eyebrow="Market Drafting" title={market.question} description="The accepted draft is framed around official action, not media pickup or market reaction." step={step} icon={<Link aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Write Market" title={market.question} description="This draft asks about an official outcome, so the answer can be checked later." step={step} icon={<Link aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2">
         <StepReveal>
           <Criteria label="YES" value={market.yesCriteria} />
@@ -1868,11 +1868,11 @@ function DecisionArtifact({
   progressRail?: ReactNode;
 }) {
   if (drafts.length === 0) {
-    return <StepPendingArtifact title="Candidate review is waiting for drafts." description={step.reasoningSnippet} progressRail={progressRail} />;
+    return <StepPendingArtifact title="Quality check is waiting for the market draft." description={step.reasoningSnippet} progressRail={progressRail} />;
   }
 
   return (
-    <StepArtifactFrame eyebrow="Validation Review" title="Candidate markets are checked for resolvability." description="The critic accepts only drafts with clear wording, evidence, deadlines, and resolution sources." step={step} icon={<ListChecks aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Quality Check" title="Market drafts are checked before approval." description="A draft passes only if the wording is clear, evidence-backed, not duplicated, and easy to resolve." step={step} icon={<ListChecks aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-5">
         {drafts.map((draft) => {
           const review = reviews.find((item) => item.draftId === draft.id);
@@ -1938,16 +1938,16 @@ function FinalArtifact({
   const market = pipelineRun.acceptedMarket;
 
   if (!market) {
-    return <StepPendingArtifact title="Trace commit is waiting for a validated market." description={step.reasoningSnippet} progressRail={progressRail} />;
+    return <StepPendingArtifact title="Saving proof is waiting for an approved market." description={step.reasoningSnippet} progressRail={progressRail} />;
   }
 
   return (
     <StepArtifactFrame
-      eyebrow={isCommittedTrace(pipelineRun.trace) ? 'Trace Commit' : 'Trace Prepared'}
+      eyebrow={isCommittedTrace(pipelineRun.trace) ? 'Proof Saved' : 'Proof Prepared'}
       title={market.question}
       description={isCommittedTrace(pipelineRun.trace)
-        ? 'The artifact hash has a live Arc transaction proof.'
-        : 'The artifact hash and source hash are staged for trace review.'}
+        ? 'A permanent Arc Testnet proof now points to this final market artifact.'
+        : 'The source and market proof are prepared for review.'}
       step={step}
       icon={<ShieldCheck aria-hidden="true" size={18} />}
       progressRail={progressRail}
@@ -2042,7 +2042,7 @@ function ComparisonMoment({ pipelineRun }: { pipelineRun: PipelineRun }) {
   const artifactItems = [
     ingestion ? `${ingestion.language} source, ${ingestion.sourceDate}, ${ingestion.region}` : 'Source fields pending',
     ingestion ? `Actors: ${getActors(ingestion.entities)}` : 'Actors pending',
-    acceptedMarket ? `Resolver: ${acceptedMarket.resolutionSource}` : 'Resolver pending',
+    acceptedMarket ? `Official source: ${acceptedMarket.resolutionSource}` : 'Official source pending',
     acceptedMarket ? `Accepted deadline: ${acceptedMarket.deadline}` : 'Deadline pending',
     `${rejectedCount} rejected alternatives retained`,
     `Trace status: ${formatTraceStatus(pipelineRun.trace)}`,

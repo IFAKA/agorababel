@@ -39,7 +39,7 @@ const stepBriefings: Record<PipelineStep['id'], StepBriefing> = {
   claim: {
     happened: 'The forecastable claim is separated from background context.',
     why: 'The market can be framed around an official action rather than a vague news theme.',
-    next: 'Resolver verification can look for a settlement source that can prove the outcome.',
+    next: 'The workflow can look for an official source that can prove the outcome.',
   },
   resolver: {
     happened: 'The market now has an official settlement source.',
@@ -52,14 +52,14 @@ const stepBriefings: Record<PipelineStep['id'], StepBriefing> = {
     next: 'A candidate market can be drafted only if the opportunity is still distinct.',
   },
   'market-creator': {
-    happened: 'A binary market draft was assembled.',
+    happened: 'A YES/NO market draft was written.',
     why: 'The artifact now has criteria, a deadline, and a resolution source that reviewers can inspect.',
-    next: 'The critic can reject weak drafts before anything is published.',
+    next: 'The quality check can reject weak drafts before anything is published.',
   },
   critic: {
     happened: 'Weak drafts were rejected before publication.',
     why: 'Only candidates with clear wording, evidence, deadlines, and resolvable outcomes continue.',
-    next: 'The accepted artifact can move into wallet and trace preparation.',
+    next: 'The accepted market can move into wallet and proof preparation.',
   },
   circle: {
     happened: 'The publication wallet status was checked.',
@@ -69,10 +69,10 @@ const stepBriefings: Record<PipelineStep['id'], StepBriefing> = {
   settlement: {
     happened: 'The accepted artifact now has a traceable proof record.',
     why: 'The market package can be audited against the structured source, criteria, and hash record.',
-    next: 'Publication metadata can be exposed for downstream access.',
+    next: 'Access details can be published for review.',
   },
   x402: {
-    happened: 'The intelligence access metadata was resolved.',
+    happened: 'The final access details were prepared.',
     why: 'The final artifact can distinguish analysis output from paid or disabled access paths.',
     next: 'The completed market artifact can be opened, copied, or reviewed.',
   },

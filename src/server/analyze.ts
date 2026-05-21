@@ -120,9 +120,9 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
 
   try {
     const extracted = await atStage('source-extraction', runId, emit, () => extractSource(sourceInput), {
-      start: 'extracting readable source text',
-      heartbeat: ['fetching source content', 'normalizing source metadata', 'hashing extracted text'],
-      complete: 'source text extracted and hashed',
+      start: 'reading the submitted source',
+      heartbeat: ['fetching source content', 'preparing source details', 'creating source proof hash'],
+      complete: 'source text is ready',
       artifact: (value) => ({
         inputType: value.inputType,
         title: value.title,
@@ -135,9 +135,9 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
     const draft = await atStage('claim-extraction', runId, emit, () => analyzeWithConfiguredLlm(extracted.text, {
       onNote: (message) => emit?.({ type: 'step-note', runId, stage: 'claim-extraction', message }),
     }), {
-      start: 'source text sent to configured LLM',
-      heartbeat: ['strict JSON draft generating', 'waiting for structured model response', 'validating draft against strict schema'],
-      complete: 'claim, resolver draft, candidates, and critic verdict parsed',
+      start: 'finding the main claim',
+      heartbeat: ['drafting the claim fields', 'waiting for model response', 'checking that required fields are present'],
+      complete: 'main claim and market drafts parsed',
       artifact: (value) => ({
         source: {
           language: value.source.language,
@@ -153,9 +153,9 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
       outboundUrls: extracted.outboundUrls,
       sourceText: extracted.text,
     }), {
-      start: 'discovering official resolver candidates',
-      heartbeat: ['checking outbound source links', 'searching official domains', 'screening resolver candidates'],
-      complete: 'official resolver discovery completed',
+      start: 'finding official source candidates',
+      heartbeat: ['checking outbound source links', 'searching official domains', 'screening official source candidates'],
+      complete: 'official source search completed',
       artifact: (value) => value,
     });
 
@@ -172,28 +172,28 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
     }
 
     const resolver = await atStage('resolver-verification', runId, emit, () => verifyResolver(resolverDiscovery.candidate, draft), {
-      start: `fetching discovered resolver URL ${resolverDiscovery.candidate.url}`,
-      heartbeat: ['checking resolver response', 'matching official body, date, and event signals'],
-      complete: 'official resolver URL verified',
+      start: `opening official source ${resolverDiscovery.candidate.url}`,
+      heartbeat: ['checking official source response', 'matching official body, date, and event signals'],
+      complete: 'official source verified',
       artifact: (value) => value,
     });
     const marketComparison = await atStage('market-comparison', runId, emit, () => compareMarketNovelty(draft), {
-      start: 'checking configured public market sources',
+      start: 'checking existing public markets',
       heartbeat: ['querying market search sources', 'scanning actor and event overlap'],
-      complete: 'novelty check completed',
+      complete: 'duplicate check completed',
       artifact: (value) => value,
     });
     const candidateMarkets = atStageSync('market-drafting', runId, emit, () => normalizeCandidateMarkets(draft, resolver), {
-      start: 'normalizing validated candidate market',
-      complete: 'accepted candidate and rejected alternatives prepared',
+      start: 'writing the YES/NO market',
+      complete: 'accepted market and rejected alternatives prepared',
       artifact: (value) => ({
         candidateMarkets: value,
         rejectedMarkets: draft.rejectedMarkets,
       }),
     });
     const criticOutcome = atStageSync('critic-review', runId, emit, () => enforceCritic(draft, marketComparison.noveltyVerdict), {
-      start: 'enforcing binary, deadline, resolver, novelty, and placeholder checks',
-      complete: 'critic verdict recorded',
+      start: 'checking wording, deadline, official source, duplicates, and placeholders',
+      complete: 'quality decision recorded',
       artifact: (value) => ({
         criticVerdict: value.criticVerdict,
         acceptedMarket: value.status === 'accepted' ? candidateMarkets[0] : null,
@@ -239,8 +239,8 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
 
     const criticVerdict = criticOutcome.criticVerdict;
     const circleAgentWallet = await atStage('circle-wallet', runId, emit, () => getCircleAgentWalletStatus(), {
-      start: 'checking Circle ARC-TESTNET wallet proof',
-      heartbeat: ['requesting Circle wallet status', 'validating configured agent wallet address'],
+      start: 'checking Circle test-wallet proof',
+      heartbeat: ['requesting Circle wallet status', 'checking configured agent wallet address'],
       complete: 'Circle wallet proof checked',
       artifact: (value) => value,
     });
@@ -281,16 +281,16 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
       acceptedMarket,
       artifact: baseArtifact,
     }), {
-      start: 'submitting artifact hash to Arc Testnet trace registry',
+      start: 'saving proof on Arc Testnet',
       heartbeat: ['waiting for Arc transaction hash', 'waiting for Arc transaction receipt'],
-      complete: 'Arc trace committed',
+      complete: 'Arc proof saved',
       artifact: (value) => value,
     });
     emit?.({ type: 'trace-committed', runId, trace: arcTrace });
     const artifactWithTrace = { ...baseArtifact, arcTrace, stage: 'x402-publication' as const };
     const x402 = atStageSync('x402-publication', runId, emit, () => publishX402Artifact(artifactWithTrace as AnalysisResult), {
-      start: 'publishing x402 intelligence access metadata',
-      complete: 'x402 publication metadata ready',
+      start: 'publishing paid-access details',
+      complete: 'paid-access details ready',
       artifact: (value) => value,
     });
 

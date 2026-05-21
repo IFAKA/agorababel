@@ -4,14 +4,14 @@ import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'motion/r
 import { AgoraBabelTraceMark } from './AgoraBabelTraceMark';
 import { pageContainerClassName } from './pageLayout';
 
-const workflow = ['Source Extraction', 'Translation & Context', 'Validation Review', 'Audit Trace'];
+const workflow = ['Read Source', 'Explain Context', 'Quality Check', 'Save Proof'];
 const repositoryUrl = 'https://github.com/IFAKA/agorababel';
 const demoSourceUrl = 'diariofinanciero.example/chile/laguna-verde-ceol';
 
 const validationSteps = [
-  { label: 'Extract event claim', detail: 'Laguna Verde CEOL identified', icon: FileText },
-  { label: 'Translate and contextualize', detail: 'Terms agreed; ratification pending', icon: Globe2 },
-  { label: 'Run schema checks', detail: 'Official resolver required', icon: ShieldCheck },
+  { label: 'Find the claim', detail: 'Laguna Verde CEOL identified', icon: FileText },
+  { label: 'Explain the context', detail: 'Terms agreed; ratification pending', icon: Globe2 },
+  { label: 'Check the rules', detail: 'Official source required', icon: ShieldCheck },
 ] as const;
 
 const microdemoReadingDelaySeconds = 7.2;

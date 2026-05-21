@@ -31,7 +31,7 @@ function printJudgeReceipt() {
   console.table([
     { stage: 'Extraction', artifact: 'Original-language source normalized' },
     { stage: 'Translation & Context', artifact: 'English operational summary and market relevance' },
-    { stage: 'Market Drafting', artifact: 'Binary YES/NO market with deadline and resolution source' },
+    { stage: 'Write Market', artifact: 'YES/NO market with deadline and official source' },
     { stage: 'Validation Review', artifact: 'Rejected weak candidates plus accepted defensible artifact' },
     { stage: 'Audit Trace', artifact: 'Trace hash prepared from structured analysis outputs' },
   ]);

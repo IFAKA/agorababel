@@ -228,18 +228,18 @@ export function MarketScreen({
                   <ReportField label="Resolution source" value={market.resolutionSource} />
                   <ReportField label="Resolution criteria" value={market.criticReasoning} />
                   <ReportField
-                    label="Arc artifact hash"
+                    label="Arc proof hash"
                     value={
                       traceCommitted
                         ? trace?.artifactHash ?? trace?.traceHash ?? 'Committed hash unavailable.'
-                        : trace?.traceHash ?? 'No committed Arc trace.'
+                        : trace?.traceHash ?? 'No saved Arc proof.'
                     }
                   />
                 </section>
 
                 {analysis && (
                   <section className="grid gap-4 border-t border-[#E5E1D8] pt-4 lg:grid-cols-3">
-                    <ProofPanel title="Official Resolver">
+                    <ProofPanel title="Official Source">
                       {analysis.resolver ? (
                         <>
                           <p className="text-sm font-semibold text-[#292824]">{analysis.resolver.name}</p>
@@ -250,15 +250,19 @@ export function MarketScreen({
                           <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.resolver.verificationEvidence}</p>
                         </>
                       ) : (
-                        <p className="text-sm leading-6 text-[#625F57]">Source analyzed, but no official resolver found.</p>
+                        <p className="text-sm leading-6 text-[#625F57]">Source analyzed, but no official decision source was found.</p>
                       )}
                     </ProofPanel>
-                    <ProofPanel title="Market Comparison">
-                      <p className="text-sm font-semibold text-[#292824]">{analysis.marketComparison?.noveltyVerdict ?? 'not checked'}</p>
-                      <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.marketComparison?.reasoning ?? analysis.rejectionReason ?? 'Market comparison did not run.'}</p>
+                    <ProofPanel title="Duplicate Check">
+                      <p className="text-sm font-semibold text-[#292824]">
+                        {analysis.marketComparison?.noveltyVerdict === 'new-opportunity'
+                          ? 'No close duplicate found'
+                          : analysis.marketComparison?.noveltyVerdict ?? 'Not checked'}
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.marketComparison?.reasoning ?? analysis.rejectionReason ?? 'Duplicate check did not run.'}</p>
                       <p className="mt-2 text-xs font-medium text-[#77746B]">{analysis.marketComparison?.similarMarkets.length ?? 0} similar markets listed</p>
                     </ProofPanel>
-                    <ProofPanel title="Circle Wallet">
+                    <ProofPanel title="Test Wallet">
                       <p className="text-sm font-semibold text-[#292824]">{analysis.circleAgentWallet.status} / {analysis.circleAgentWallet.blockchain}</p>
                       <p className="mt-2 break-all text-sm leading-6 text-[#625F57]">{analysis.circleAgentWallet.address ?? 'No wallet address'}</p>
                       <p className="mt-1 text-xs font-medium text-[#77746B]">Wallet ID: {analysis.circleAgentWallet.walletId ?? 'missing'}</p>
@@ -478,7 +482,7 @@ function ArtifactComparison({ pipelineRun }: { pipelineRun: PipelineRun }) {
   const artifactItems = [
     ingestion ? `${ingestion.language} source, ${ingestion.sourceDate}, ${ingestion.region}` : 'Source metadata unavailable',
     ingestion ? `Actors: ${ingestion.entities.filter((entity) => entity !== ingestion.region).join(', ') || 'Not provided'}` : 'Actors unavailable',
-    market ? `Accepted resolver: ${market.resolutionSource}` : 'Resolver unavailable',
+    market ? `Official source: ${market.resolutionSource}` : 'Official source unavailable',
     market ? `Accepted deadline: ${market.deadline}` : 'Deadline unavailable',
     `${rejectedCount} rejected alternatives with reasons`,
     `Trace status: ${describeTraceForMemo(pipelineRun.trace)}`,
@@ -646,10 +650,10 @@ function describeTraceForMemo(trace: PipelineRun['trace']) {
   }
 
   if (isCommittedTrace(trace)) {
-    return `Arc Testnet transaction ${trace.transactionId}; artifact hash ${trace.artifactHash ?? trace.traceHash}.`;
+    return `Proof saved on Arc Testnet in transaction ${trace.transactionId}; proof hash ${trace.artifactHash ?? trace.traceHash}.`;
   }
 
-  return `Local trace prepared from structured outputs; no Arc transaction or x402 proof is attached. Trace hash ${trace.traceHash}.`;
+  return `Local proof prepared from the source and market draft; no Arc transaction or paid-access proof is attached. Proof hash ${trace.traceHash}.`;
 }
 
 function formatMicroUsdc(value: number | null | undefined) {

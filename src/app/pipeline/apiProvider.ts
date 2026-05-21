@@ -31,15 +31,15 @@ type StreamEvent =
   | { type: 'run-failed'; runId?: string; stage: PipelineErrorBrief['stage']; error: string; likelyCause: string; details?: string[] };
 
 const stageOrder: PipelineStep[] = [
-  createStep('extraction', 'Source Extraction', 'Source Extractor', 'Extract readable source text. URL inputs must produce real article text.', 'Waiting for submitted evidence.', 'No source extracted yet.', 'source-extraction'),
-  createStep('claim', 'Claim Extraction', 'Claim Extractor', 'Extract event claim, actors, source language, evidence snippets, and deadline.', 'Waiting for source extraction.', 'No claim extracted yet.', 'claim-extraction'),
-  createStep('resolver', 'Official Resolver', 'Resolver Discovery', 'Discover and verify the exact official resolver URL.', 'Waiting for claim extraction.', 'No official resolver found yet.', 'resolver-verification'),
-  createStep('comparison', 'Market Comparison', 'Market Scout', 'Check configured market sources for similar existing markets.', 'Waiting for resolver verification.', 'No novelty check completed yet.', 'market-comparison'),
-  createStep('market-creator', 'Market Drafting', 'Market Drafter', 'Draft one supported candidate and source-specific rejected alternatives.', 'Waiting for market comparison.', 'No market drafted yet.', 'market-drafting'),
-  createStep('critic', 'Critic Review', 'Critic', 'Enforce binary wording, deadline, official resolver, novelty, and placeholder checks.', 'Waiting for drafted candidates.', 'No critic verdict yet.', 'critic-review'),
-  createStep('circle', 'Circle Wallet', 'Circle Wallet Agent', 'Verify the configured Circle Developer-Controlled ARC-TESTNET wallet.', 'Waiting for accepted critic verdict.', 'No Circle wallet proof yet.', 'circle-wallet'),
-  createStep('settlement', 'Arc Trace Commit', 'Arc Committer', 'Commit the accepted artifact hash to the Arc Testnet trace registry.', 'Waiting for Circle readiness.', 'No Arc transaction yet.', 'arc-trace-commit'),
-  createStep('x402', 'x402 Publication', 'x402 Publisher', 'Publish paid intelligence metadata for agent-to-agent artifact access.', 'Waiting for Arc commit.', 'No x402 publication yet.', 'x402-publication'),
+  createStep('extraction', 'Read Source', 'Source Reader', 'Turn the submitted URL or pasted text into readable source material.', 'Waiting for submitted source.', 'No readable source yet.', 'source-extraction'),
+  createStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', 'Waiting for source reading.', 'No main claim found yet.', 'claim-extraction'),
+  createStep('resolver', 'Check Official Source', 'Official Source Checker', 'Find and verify the official page that will decide YES or NO.', 'Waiting for main claim.', 'No official source found yet.', 'resolver-verification'),
+  createStep('comparison', 'Check Duplicates', 'Market Duplicate Checker', 'Search existing market sources for close matches.', 'Waiting for official source check.', 'No duplicate check completed yet.', 'market-comparison'),
+  createStep('market-creator', 'Write Market', 'Market Writer', 'Write one clear YES/NO market with rules, evidence, and a deadline.', 'Waiting for duplicate check.', 'No market draft yet.', 'market-drafting'),
+  createStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', 'Waiting for market drafts.', 'No quality decision yet.', 'critic-review'),
+  createStep('circle', 'Check Wallet', 'Wallet Checker', 'Check the Circle test wallet used to attach a proof record.', 'Waiting for approved market.', 'No wallet proof yet.', 'circle-wallet'),
+  createStep('settlement', 'Save Proof', 'Proof Saver', 'Save proof of the accepted market on Arc Testnet.', 'Waiting for wallet check.', 'No Arc proof yet.', 'arc-trace-commit'),
+  createStep('x402', 'Publish Access', 'Access Publisher', 'Publish access details for the final paid artifact.', 'Waiting for saved proof.', 'No access details published yet.', 'x402-publication'),
 ];
 
 export class ApiPipelineProvider implements PipelineProvider {
@@ -52,7 +52,7 @@ export class ApiPipelineProvider implements PipelineProvider {
     });
 
     emitProductEvent('source_submitted', { runId: run.id, sourceType: looksLikeUrl(input.sourceText) ? 'url' : 'text' });
-    run = appendActivity(run, 'Source Queue', 'running', 'No-fallback analysis started.', 'The API must return verified evidence, Circle wallet proof, Arc commit, and x402 metadata before accepting a market.');
+    run = appendActivity(run, 'Source Queue', 'running', 'Live analysis started.', 'The API must return verified evidence, wallet proof, Arc proof, and paid-access details before accepting a market.');
     run = appendOperation(run, 'extraction', {
       label: 'Source submitted',
       status: 'running',
@@ -430,7 +430,7 @@ function revealStreamArtifact(run: PipelineRun, stage: PipelineStage, artifact: 
       context: {
         englishSummary: String(claim.summary ?? 'Claim extracted.'),
         marketRelevance: 'Medium',
-        relevanceExplanation: 'Structured claim fields validated; novelty check is still pending.',
+        relevanceExplanation: 'The main claim has the fields needed for a market. Duplicate checking is still pending.',
         evidenceSummary: evidence,
       },
     });
@@ -504,7 +504,7 @@ function stageCompletionReasoning(stage: PipelineStage, artifact: unknown) {
       ? `Official resolver candidate selected: ${String(candidate?.url ?? 'candidate selected')}`
       : String(value.reason ?? 'No official resolver candidate found.');
   }
-  if (stage === 'resolver-verification') return String(value.verificationEvidence ?? 'Resolver fetch and identity checks passed.');
+  if (stage === 'resolver-verification') return String(value.verificationEvidence ?? 'Official source fetch and identity checks passed.');
   if (stage === 'market-comparison') return String(value.reasoning ?? 'Novelty check completed.');
   if (stage === 'market-drafting') return 'Candidate and rejected alternatives are normalized from validated fields.';
   if (stage === 'critic-review') return String(isRecord(value.criticVerdict) ? value.criticVerdict.reasoning ?? 'Critic checks passed.' : 'Critic checks passed.');
@@ -629,7 +629,9 @@ function outputForStage(analysis: AnalysisResult, stage: PipelineStage, mode: 'r
     case 'resolver-verification':
       return mode === 'summary' ? `${analysis.resolver?.name ?? 'No resolver'} verified.` : analysis.resolver?.verificationEvidence ?? analysis.rejectionReason ?? 'No resolver verified.';
     case 'market-comparison':
-      return mode === 'summary' ? `Novelty verdict: ${analysis.marketComparison?.noveltyVerdict ?? 'not checked'}.` : analysis.marketComparison?.reasoning ?? 'Market comparison did not run.';
+      return mode === 'summary'
+        ? `Duplicate check: ${analysis.marketComparison?.noveltyVerdict === 'new-opportunity' ? 'no close duplicate found' : analysis.marketComparison?.noveltyVerdict ?? 'not checked'}.`
+        : analysis.marketComparison?.reasoning ?? 'Duplicate check did not run.';
     case 'market-drafting':
       return mode === 'summary' ? analysis.candidateMarkets[0]?.question ?? 'No candidate market.' : `${analysis.rejectedMarkets.length} rejected alternatives retained.`;
     case 'critic-review':
@@ -640,11 +642,11 @@ function outputForStage(analysis: AnalysisResult, stage: PipelineStage, mode: 'r
         : analysis.circleAgentWallet.address ?? analysis.circleAgentWallet.error ?? 'No wallet proof.';
     case 'arc-trace-commit':
       return mode === 'summary'
-        ? analysis.arcTrace ? `Committed ${analysis.arcTrace.transactionHash.slice(0, 14)}...` : 'Arc commit missing.'
-        : analysis.arcTrace?.artifactHash ?? 'No artifact hash committed.';
+        ? analysis.arcTrace ? `Proof saved ${analysis.arcTrace.transactionHash.slice(0, 14)}...` : 'Arc proof missing.'
+        : analysis.arcTrace?.artifactHash ?? 'No proof hash saved.';
     case 'x402-publication':
       return mode === 'summary'
-        ? analysis.x402 ? `x402 ${analysis.x402.status} at ${analysis.x402.intelligenceUrl}.` : 'x402 publication missing.'
+        ? analysis.x402 ? `Access ${analysis.x402.status} at ${analysis.x402.intelligenceUrl}.` : 'Access publication missing.'
         : analysis.x402?.payToAddress ?? 'No payment address configured.';
     default:
       return analysis.rejectionReason ?? 'Pipeline completed.';
@@ -759,16 +761,16 @@ function labelForStep(stepId: PipelineStep['id']) {
 function liveOperationLabelForStage(stage: PipelineStage, phase: 'start' | 'note' | 'complete'): string {
   const fallback = phase === 'start' ? 'Stage started' : phase === 'note' ? 'Backend progress' : 'Stage completed';
   const labels: Partial<Record<PipelineStage, Record<typeof phase, string>>> = {
-    'source-extraction': { start: 'Source read started', note: 'Extraction progress', complete: 'Extracted text hashed' },
-    'claim-extraction': { start: 'LLM schema pass started', note: 'Structured fields extracted', complete: 'Strict JSON validated' },
-    'resolver-discovery': { start: 'Resolver discovery started', note: 'Resolver search running', complete: 'Resolver candidate recorded' },
-    'resolver-verification': { start: 'Resolver fetch started', note: 'Resolver identity checked', complete: 'Resolver evidence verified' },
-    'market-comparison': { start: 'Market-source scan started', note: 'Similarity scan running', complete: 'Novelty verdict recorded' },
-    'market-drafting': { start: 'Draft generation started', note: 'Alternatives staged', complete: 'Candidate draft accepted' },
-    'critic-review': { start: 'Critic rules started', note: 'Rule checks running', complete: 'Critic verdict recorded' },
+    'source-extraction': { start: 'Source read started', note: 'Source reading progress', complete: 'Source proof hash ready' },
+    'claim-extraction': { start: 'Main claim search started', note: 'Claim fields extracted', complete: 'Main claim checked' },
+    'resolver-discovery': { start: 'Official source search started', note: 'Official source search running', complete: 'Official source candidate recorded' },
+    'resolver-verification': { start: 'Official source fetch started', note: 'Official source checked', complete: 'Official source verified' },
+    'market-comparison': { start: 'Duplicate search started', note: 'Similarity scan running', complete: 'Duplicate check recorded' },
+    'market-drafting': { start: 'Market draft started', note: 'Alternatives staged', complete: 'Market draft accepted' },
+    'critic-review': { start: 'Quality checks started', note: 'Quality checks running', complete: 'Quality decision recorded' },
     'circle-wallet': { start: 'Circle wallet check started', note: 'Wallet status fetched', complete: 'Wallet proof ready' },
-    'arc-trace-commit': { start: 'Trace commit started', note: 'Proof hashes staged', complete: 'Trace transaction returned' },
-    'x402-publication': { start: 'x402 publication started', note: 'Gateway metadata staged', complete: 'Publication metadata ready' },
+    'arc-trace-commit': { start: 'Arc proof save started', note: 'Proof hashes staged', complete: 'Arc transaction returned' },
+    'x402-publication': { start: 'Access publication started', note: 'Payment gateway staged', complete: 'Access metadata ready' },
   };
 
   return labels[stage]?.[phase] ?? fallback;
