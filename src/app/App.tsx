@@ -180,6 +180,12 @@ export default function App() {
     setCurrentScreen('market');
   };
 
+  const handleBackToWorkflow = () => {
+    window.history.pushState({}, '', getPathForScreen('create'));
+    setTransitionDirection(screenOrder.create >= screenOrder[currentScreenRef.current] ? 1 : -1);
+    setCurrentScreen('create');
+  };
+
   const handleGenerateMarket = (input: string) => {
     if (sampleRunTimerRef.current !== null) {
       window.clearTimeout(sampleRunTimerRef.current);
@@ -338,7 +344,7 @@ export default function App() {
                       onNewAnalysis={handleNewAnalysis}
                     />
                   )}
-                  {currentScreen === 'market' && <MarketScreen pipelineRun={pipelineRun} />}
+                  {currentScreen === 'market' && <MarketScreen pipelineRun={pipelineRun} onBackToWorkflow={handleBackToWorkflow} />}
                 </motion.div>
               </AnimatePresence>
             </div>

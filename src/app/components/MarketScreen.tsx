@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Clipboard, Download, ExternalLink, LoaderCircle, LockKeyhole, ReceiptText, Share2, WalletCards } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Clipboard, Download, ExternalLink, LoaderCircle, LockKeyhole, ReceiptText, Share2, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { emitProductEvent } from '../pipeline/apiProvider';
 import type { PipelineRun } from '../pipeline/types';
@@ -6,8 +6,10 @@ import { pageContainerClassName } from './pageLayout';
 
 export function MarketScreen({
   pipelineRun,
+  onBackToWorkflow,
 }: {
   pipelineRun: PipelineRun;
+  onBackToWorkflow: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -134,16 +136,21 @@ export function MarketScreen({
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className={pageContainerClassName}>
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E3DED3] pb-4">
-            <div>
-              <div className="eyebrow">Validated Prediction-Market Artifact</div>
-              <div className="mt-2 text-sm text-[#77746B]">
-                {ingestion ? `Original-language source: ${ingestion.language} / ${ingestion.source} / ${ingestion.region}` : 'No persisted artifact found for this route.'}
-              </div>
-              {pipelineRun.analyzedInMs !== undefined && (
-                <div className="mt-1 text-sm font-medium text-[#77746B]">
-                  Analyzed in {(pipelineRun.analyzedInMs / 1000).toFixed(1)}s
+            <div className="flex min-w-0 items-start gap-3">
+              <button type="button" onClick={onBackToWorkflow} className="secondary-button pressable h-10 min-h-10 px-3" aria-label="Back to workflow steps">
+                <ArrowLeft aria-hidden="true" size={15} />
+              </button>
+              <div className="min-w-0">
+                <div className="eyebrow">Validated Prediction-Market Artifact</div>
+                <div className="mt-2 text-sm text-[#77746B]">
+                  {ingestion ? `Original-language source: ${ingestion.language} / ${ingestion.source} / ${ingestion.region}` : 'No persisted artifact found for this route.'}
                 </div>
-              )}
+                {pipelineRun.analyzedInMs !== undefined && (
+                  <div className="mt-1 text-sm font-medium text-[#77746B]">
+                    Analyzed in {(pipelineRun.analyzedInMs / 1000).toFixed(1)}s
+                  </div>
+                )}
+              </div>
             </div>
             {operatorMemo && (
               <div className="flex flex-wrap gap-2">

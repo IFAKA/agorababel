@@ -5,6 +5,7 @@ import {
   FileText,
   ExternalLink,
   Globe2,
+  History,
   Languages,
   Link,
   ListChecks,
@@ -37,6 +38,13 @@ type ProgressStep = {
   description: string;
   status: PipelineStepStatus;
   selectable: boolean;
+};
+type HistoryItem = {
+  id: string;
+  label: string;
+  detail: string;
+  status: PipelineStepStatus | 'accepted';
+  timestamp?: string;
 };
 type StepTransitionDirection = -1 | 0 | 1;
 type ArtifactView = {
@@ -164,7 +172,7 @@ export function ProcessingScreen({
       id: 'source',
       label: 'Source',
       description: hasStarted ? 'The submitted source is locked for analysis.' : 'Paste source material and submit it for analysis.',
-      status: hasStarted && !showSourceAccepted ? 'complete' : 'running',
+      status: hasStarted && !showSourceAccepted ? 'complete' : hasStarted ? 'running' : 'pending',
       selectable: false,
     },
     ...presentedSteps.map((step) => ({
@@ -176,17 +184,21 @@ export function ProcessingScreen({
     })),
   ], [hasStarted, presentedSteps, showSourceAccepted]);
   const selectedProgressStepId: ProgressStepId | undefined = !hasStarted || showSourceAccepted ? 'source' : displayedStep?.id;
-  const progressRail = (
-    <ProgressRail
-      steps={progressSteps}
-      selectedStepId={selectedProgressStepId}
-      onSelectStep={(stepId) => {
-        if (stepId === 'source') return;
+  const handleSelectProgressStep = (stepId: ProgressStepId) => {
+    if (stepId === 'source') return;
 
-        const step = presentedSteps.find((item) => item.id === stepId);
-        if (step?.status !== 'pending') setSelectedStepId(stepId);
-      }}
-    />
+    const step = presentedSteps.find((item) => item.id === stepId);
+    if (step?.status !== 'pending') setSelectedStepId(stepId);
+  };
+  const historyItems = useMemo(
+    () => createHistoryItems({
+      pipelineRun,
+      presentedSteps,
+      sourceText,
+      hasStarted,
+      showSourceAccepted,
+    }),
+    [hasStarted, pipelineRun, presentedSteps, showSourceAccepted, sourceText],
   );
 
   useEffect(() => {
@@ -270,8 +282,15 @@ export function ProcessingScreen({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-[#F7F6F1] text-[#191A1C]">
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className={`${pageContainerClassName} max-w-7xl`}>
-          <section className="mx-auto w-full max-w-7xl min-w-0">
+        <div className={`${pageContainerClassName} max-w-[92rem]`}>
+          <section className="mx-auto grid w-full min-w-0 gap-5 lg:grid-cols-[21rem_minmax(0,1fr)] xl:grid-cols-[22.5rem_minmax(0,1fr)]">
+            <WorkflowSidebar
+              steps={progressSteps}
+              selectedStepId={selectedProgressStepId}
+              historyItems={historyItems}
+              onSelectStep={handleSelectProgressStep}
+              onNewAnalysis={onNewAnalysis}
+            />
             <PipelineArtifact
               sourceText={sourceText}
               onSourceTextChange={onSourceTextChange}
@@ -286,7 +305,6 @@ export function ProcessingScreen({
               onOpenFinalArtifact={onOpenFinalArtifact}
               onNewAnalysis={onNewAnalysis}
               isComplete={isComplete}
-              progressRail={progressRail}
               transitionDirection={!hasStarted || showSourceAccepted || (hasStarted && displayedStepIndex === 0 && presentedStep.status === 'running') ? 1 : stepTransitionDirection}
               showSourceInput={!hasStarted}
               showSourceAccepted={showSourceAccepted}
@@ -376,6 +394,194 @@ function SourceInput({
       </button>
     </section>
   );
+}
+
+
+function WorkflowSidebar({
+  steps,
+  selectedStepId,
+  historyItems,
+  onSelectStep,
+  onNewAnalysis,
+}: {
+  steps: ProgressStep[];
+  selectedStepId?: ProgressStepId;
+  historyItems: HistoryItem[];
+  onSelectStep: (stepId: ProgressStepId) => void;
+  onNewAnalysis: () => void;
+}) {
+  return (
+    <aside className="min-w-0 lg:sticky lg:top-5 lg:self-start" aria-label="Create workflow sidebar">
+      <div className="artifact-card overflow-hidden bg-white shadow-[0_20px_55px_rgba(29,28,24,0.06)]">
+        <div className="flex items-start justify-between gap-3 border-b border-[#EEE9DF] bg-[#FBFAF7] p-5">
+          <div>
+            <div className="eyebrow">Workflow</div>
+            <p className="mt-2 text-sm font-medium leading-6 text-[#625F57]">Step through the run and revisit completed artifacts.</p>
+          </div>
+          <button type="button" onClick={onNewAnalysis} className="secondary-button pressable h-10 min-h-10 px-3 text-xs">
+            <span className="inline-flex items-center justify-center gap-2">
+              <RotateCcw aria-hidden="true" size={14} />
+              New
+            </span>
+          </button>
+        </div>
+        <div className="grid gap-6 p-5">
+          <VerticalProgressRail steps={steps} selectedStepId={selectedStepId} onSelectStep={onSelectStep} />
+          <RunHistory items={historyItems} />
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function VerticalProgressRail({
+  steps,
+  selectedStepId,
+  onSelectStep,
+}: {
+  steps: ProgressStep[];
+  selectedStepId?: ProgressStepId;
+  onSelectStep: (stepId: ProgressStepId) => void;
+}) {
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <nav aria-label="Workflow progress">
+      <ol className="grid gap-0">
+        {steps.map((step, index) => {
+          const state = getStepState(step.status);
+          const nextStep = steps[index + 1];
+          const nextState = nextStep ? getStepState(nextStep.status) : undefined;
+          const selected = selectedStepId === step.id;
+          const disabled = !step.selectable;
+
+          return (
+            <li key={step.id} className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-3">
+              <div className="grid justify-items-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!disabled) onSelectStep(step.id);
+                  }}
+                  disabled={disabled}
+                  aria-current={selected ? 'step' : undefined}
+                  aria-label={`${step.label}: ${step.description}`}
+                  className={`mt-1 grid size-7 place-items-center rounded-full border transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
+                    selected
+                      ? 'border-[#171717] bg-[#171717] text-white shadow-[0_0_0_4px_rgba(23,23,23,0.08)]'
+                      : state === 'complete'
+                        ? 'border-[#CFC8BA] bg-white text-[#171717] hover:border-[#171717]'
+                        : state === 'failed'
+                          ? 'border-[#8C3D32] bg-[#FFF9F5] text-[#8C3D32]'
+                          : 'border-[#D8D3C8] bg-[#F7F6F1] text-[#9D998E] opacity-80'
+                  }`}
+                >
+                  <StepMark state={state} compact selected={selected} />
+                </button>
+                {index < steps.length - 1 && <VerticalStepConnector state={state} nextState={nextState} reduceMotion={Boolean(reduceMotion)} />}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!disabled) onSelectStep(step.id);
+                }}
+                disabled={disabled}
+                className={`min-w-0 rounded-md px-2 py-1.5 text-left transition-colors duration-200 disabled:cursor-not-allowed ${
+                  selected ? 'bg-[#171717] text-white' : disabled ? 'text-[#9D998E]' : 'text-[#292824] hover:bg-[#F7F6F1]'
+                }`}
+              >
+                <span className="block truncate text-sm font-semibold leading-5">{step.label}</span>
+                <span className={`mt-1 block text-xs leading-5 ${selected ? 'text-white/72' : 'text-[#77746B]'}`}>{step.description}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+function VerticalStepConnector({
+  state,
+  nextState,
+  reduceMotion,
+}: {
+  state: StepState;
+  nextState?: StepState;
+  reduceMotion: boolean;
+}) {
+  const isPassed = state === 'complete' && nextState !== 'pending';
+  const isPreparingNext = state === 'complete' && nextState === 'pending';
+  const isFailed = state === 'failed';
+  const guideClassName = isFailed
+    ? 'bg-[repeating-linear-gradient(to_bottom,#C58778_0_4px,transparent_4px_8px)]'
+    : 'bg-[repeating-linear-gradient(to_bottom,#C8C1B3_0_4px,transparent_4px_8px)]';
+
+  return (
+    <span aria-hidden="true" className="pointer-events-none relative my-1 h-8 w-px overflow-hidden">
+      <span className={`absolute inset-0 ${guideClassName}`} />
+      {isPassed && !reduceMotion ? (
+        <motion.span
+          key="vertical-solid-connector"
+          className="absolute inset-x-0 top-0 h-full origin-top bg-[#171717]"
+          initial={{ scaleY: 0 }}
+          animate={{ scaleY: 1 }}
+          transition={{ duration: 0.62, ease: [0.23, 1, 0.32, 1] }}
+          style={{ transformOrigin: 'top' }}
+        />
+      ) : isPassed ? (
+        <span className="absolute inset-0 bg-[#171717]" />
+      ) : isPreparingNext && !reduceMotion ? (
+        <motion.span
+          key="vertical-handoff-connector"
+          className="absolute inset-x-0 top-0 h-full origin-top bg-gradient-to-b from-[#171717] via-[#171717] to-transparent"
+          initial={{ scaleY: 0, opacity: 0 }}
+          animate={{ scaleY: [0, 0.42, 0.72], opacity: [0, 1, 0.38] }}
+          transition={{ duration: 0.86, ease: [0.23, 1, 0.32, 1] }}
+          style={{ transformOrigin: 'top' }}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+function RunHistory({ items }: { items: HistoryItem[] }) {
+  return (
+    <section className="border-t border-[#EEE9DF] pt-5" aria-label="Run history">
+      <div className="flex items-center justify-between gap-3">
+        <div className="eyebrow">History</div>
+        <History aria-hidden="true" size={15} className="text-[#77746B]" />
+      </div>
+      <div className="mt-4 grid max-h-[34vh] gap-2 overflow-y-auto pr-1 lg:max-h-[42vh]">
+        {items.length > 0 ? items.map((item) => (
+          <div key={item.id} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3">
+            <div className="flex items-start gap-2">
+              <HistoryStatusDot status={item.status} />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold leading-5 text-[#292824]">{item.label}</div>
+                <p className="mt-1 text-xs leading-5 text-[#625F57] [overflow-wrap:anywhere]">{item.detail}</p>
+                {item.timestamp && <time className="mt-2 block text-[11px] font-medium text-[#9D998E]" dateTime={item.timestamp}>{formatOperationTime(item.timestamp)}</time>}
+              </div>
+            </div>
+          </div>
+        )) : (
+          <p className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm leading-6 text-[#625F57]">No run history yet.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function HistoryStatusDot({ status }: { status: HistoryItem['status'] }) {
+  const className = status === 'complete' || status === 'accepted'
+    ? 'bg-[#526247]'
+    : status === 'running'
+      ? 'bg-[#171717]'
+      : status === 'failed'
+        ? 'bg-[#8C3D32]'
+        : 'bg-[#C8C1B3]';
+
+  return <span aria-hidden="true" className={`mt-1.5 size-2 shrink-0 rounded-full ${className}`} />;
 }
 
 function ProgressRail({
@@ -1614,6 +1820,73 @@ type SourceReadiness = {
   message: string;
   tone: 'idle' | 'blocked' | 'ready';
 };
+
+
+function createHistoryItems({
+  pipelineRun,
+  presentedSteps,
+  sourceText,
+  hasStarted,
+  showSourceAccepted,
+}: {
+  pipelineRun: PipelineRun;
+  presentedSteps: PipelineStep[];
+  sourceText: string;
+  hasStarted: boolean;
+  showSourceAccepted: boolean;
+}): HistoryItem[] {
+  const items: HistoryItem[] = [];
+  const submittedSource = pipelineRun.sourceInput || sourceText;
+
+  if (submittedSource.trim()) {
+    const summary = getSubmittedSourceSummary(submittedSource);
+    items.push({
+      id: 'source-submitted',
+      label: hasStarted ? 'Source submitted' : 'Source draft',
+      detail: summary.text || 'Waiting for source material.',
+      status: hasStarted && !showSourceAccepted ? 'complete' : hasStarted ? 'running' : 'pending',
+      timestamp: hasStarted ? pipelineRun.createdAt : undefined,
+    });
+  }
+
+  for (const step of presentedSteps) {
+    if (step.status === 'pending') continue;
+
+    const operations = pipelineRun.stepOperations[step.id] ?? [];
+    const lastOperation = operations.length > 0 ? operations[operations.length - 1] : undefined;
+    const detail = lastOperation?.detail || step.outputSummary || step.reasoningSnippet || step.action;
+
+    items.push({
+      id: `step-${step.id}`,
+      label: stepLabels[step.id],
+      detail: sanitizeOperationText(detail),
+      status: step.status,
+      timestamp: lastOperation?.timestamp,
+    });
+  }
+
+  if (pipelineRun.acceptedMarket) {
+    items.push({
+      id: 'accepted-market',
+      label: 'Artifact accepted',
+      detail: pipelineRun.acceptedMarket.question,
+      status: 'accepted',
+      timestamp: pipelineRun.updatedAt,
+    });
+  }
+
+  if (pipelineRun.error) {
+    items.push({
+      id: 'run-error',
+      label: pipelineRun.errorBrief?.title ?? 'Run stopped',
+      detail: pipelineRun.error,
+      status: 'failed',
+      timestamp: pipelineRun.updatedAt,
+    });
+  }
+
+  return items;
+}
 
 function getSourceReadiness(value: string, isRunning: boolean): SourceReadiness {
   const trimmedValue = value.trim();
