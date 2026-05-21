@@ -3,7 +3,7 @@ import { createDemoArtifactRun, createPendingPipelineRun } from './simulatedProv
 import type { PipelineRun } from './types';
 
 const STORAGE_PREFIX = 'agorababel:pipelineRun:';
-export const DEFAULT_MARKET_SLUG = sampleArticle.id;
+export const DEFAULT_MARKET_SLUG: string = sampleArticle.id;
 
 export function getMarketSlugFromPath(pathname = window.location.pathname) {
   const match = pathname.match(/^\/markets\/([^/?#]+)/);

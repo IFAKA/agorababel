@@ -14,12 +14,12 @@ export class LlmPipelineProvider implements PipelineProvider {
   protected validateStructuredOutput(output: ExternalLlmStructuredOutput) {
     const sourceAnalysis = validateLlmSourceAnalysis(output.sourceAnalysis);
     if (!sourceAnalysis.success) {
-      throw new Error(sourceAnalysis.error);
+      throw new Error('Source analysis validation failed.');
     }
 
     const marketDraft = validateLlmMarketDraft(output.marketDraft);
     if (!marketDraft.success) {
-      throw new Error(marketDraft.error);
+      throw new Error('Market draft validation failed.');
     }
 
     return {

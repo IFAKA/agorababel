@@ -6,7 +6,7 @@ import { MarketScreen } from './components/MarketScreen';
 import { AgoraBabelTraceMark } from './components/AgoraBabelTraceMark';
 import { sampleArticle } from './sampleArticleData';
 import { DEFAULT_MARKET_SLUG, getMarketPath, getMarketSlugFromPath, getPipelineRunSlug, hydratePipelineRunForSlug, persistCompletedPipelineRun } from './pipeline/artifactStorage';
-import { ApiPipelineProvider, createSubmission, runAgentPipeline, type PipelineRun } from './pipeline';
+import { ApiPipelineProvider, createSubmission, runAgentPipeline, SimulatedPipelineProvider, type PipelineProvider, type PipelineRun } from './pipeline';
 
 export type Screen = 'landing' | 'create' | 'market';
 
@@ -55,10 +55,12 @@ export default function App() {
       : runAgentPipeline(createSubmission('')),
   );
   const [transitionDirection, setTransitionDirection] = useState(1);
+  const [activePipelineProvider, setActivePipelineProvider] = useState<PipelineProvider | null>(null);
   const currentScreenRef = useRef(currentScreen);
   const sampleRunTimerRef = useRef<number | null>(null);
   const reduceMotion = useReducedMotion();
   const apiPipelineProvider = useMemo(() => new ApiPipelineProvider(), []);
+  const demoPipelineProvider = useMemo(() => new SimulatedPipelineProvider(), []);
 
   useEffect(() => {
     currentScreenRef.current = currentScreen;
@@ -146,6 +148,7 @@ export default function App() {
     const submission = createSubmission(input);
     setSourceText(submission.sourceText);
     setPipelineRun(runAgentPipeline(submission));
+    setActivePipelineProvider(apiPipelineProvider);
     setRunId((currentRunId) => currentRunId + 1);
     handleNavigate('create');
   };
@@ -169,17 +172,17 @@ export default function App() {
 
     if (sampleRunTimerRef.current !== null) {
       window.clearTimeout(sampleRunTimerRef.current);
+      sampleRunTimerRef.current = null;
     }
 
     setSourceText(submission.sourceText);
     setPipelineRun(runAgentPipeline(submission));
-    setRunId(0);
     handleNavigate('create');
 
-    sampleRunTimerRef.current = window.setTimeout(() => {
-      sampleRunTimerRef.current = null;
-      handleGenerateMarket(submission.sourceText);
-    }, 420);
+    void resolveSampleProvider().then((provider) => {
+      setActivePipelineProvider(provider === 'api' ? apiPipelineProvider : demoPipelineProvider);
+      setRunId((currentRunId) => currentRunId + 1);
+    });
   };
 
   const handleNewAnalysis = () => {
@@ -190,12 +193,13 @@ export default function App() {
 
     setSourceText('');
     setPipelineRun(runAgentPipeline(createSubmission('')));
+    setActivePipelineProvider(null);
     setRunId(0);
     handleNavigate('create');
   };
 
   useEffect(() => {
-    if (runId === 0) {
+    if (runId === 0 || !activePipelineProvider) {
       return;
     }
 
@@ -203,7 +207,7 @@ export default function App() {
     const runSourceText = sourceText;
 
     async function runPipeline() {
-      const pipelineUpdates = apiPipelineProvider.run({ sourceText: runSourceText });
+      const pipelineUpdates = activePipelineProvider.run({ sourceText: runSourceText });
 
       for await (const update of pipelineUpdates) {
         if (cancelled) {
@@ -219,7 +223,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [runId, apiPipelineProvider]);
+  }, [runId, activePipelineProvider]);
 
   useEffect(() => {
     if (pipelineRun.status === 'complete' && pipelineRun.acceptedMarket) {
@@ -306,6 +310,17 @@ export default function App() {
       </LayoutGroup>
     </MotionConfig>
   );
+}
+
+async function resolveSampleProvider(): Promise<'api' | 'demo'> {
+  try {
+    const response = await fetch('/api/runtime-status');
+    const payload = await response.json().catch(() => null) as { status?: unknown } | null;
+
+    return payload?.status === 'ready' ? 'api' : 'demo';
+  } catch {
+    return 'demo';
+  }
 }
 
 function SplashScreen({ settling }: { settling: boolean }) {

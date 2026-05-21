@@ -1,9 +1,16 @@
+import type {
+  AnalysisResult,
+  CircleAgentWalletStatus,
+  CriticVerdict as StrictCriticVerdict,
+  MarketQuestion as StrictMarketQuestion,
+  PipelineStage,
+  RejectedMarketReview as StrictRejectedMarketReview,
+  X402PublicationStatus,
+} from './analysisSchema';
+
 export type AgentRunStatus = 'idle' | 'running' | 'trace-committed' | 'complete' | 'failed';
-
 export type PipelineRunStatus = AgentRunStatus;
-
 export type PipelineStepStatus = 'pending' | 'running' | 'complete' | 'failed';
-
 export type MarketRelevance = 'Low' | 'Medium' | 'High';
 
 export type SourceAnalysis = {
@@ -39,45 +46,21 @@ export type ExtractedSource = {
   text: string;
 };
 
-export type MarketQuestion = {
-  id: string;
-  question: string;
-  yesCriteria: string;
-  noCriteria: string;
-  deadline: string;
+export type MarketQuestion = Omit<StrictMarketQuestion, 'resolverName' | 'resolverUrl'> & {
+  resolverName?: string;
+  resolverUrl?: string;
   resolutionSource: string;
-  evidenceSummary: string;
-  confidenceScore: number;
+  confidenceScore?: number;
 };
 
 export type MarketQuestionDraft = MarketQuestion;
-
-export type RejectedMarketRule = 'ambiguity' | 'no deadline' | 'subjective wording' | 'weak resolution';
-
-export type CriticCheck = {
-  ambiguity: 'pass' | 'fail';
-  resolvability: 'pass' | 'fail';
-  deadline: 'pass' | 'fail';
-  evidence: 'pass' | 'fail';
-  resolutionSource: 'pass' | 'fail';
-};
-
-export type CriticVerdict = {
-  draftId: string | null;
-  decision: 'accepted' | 'rejected';
-  checks: CriticCheck;
-  reasoning: string;
+export type CriticVerdict = StrictCriticVerdict & {
   violatedRule?: RejectedMarketRule;
 };
-
+export type RejectedMarketReview = StrictRejectedMarketReview;
+export type RejectedMarketRule = StrictRejectedMarketReview['violatedRule'];
+export type CriticCheck = CriticVerdict['checks'];
 export type CriticReview = CriticVerdict;
-
-export type RejectedMarketReview = {
-  draftId: string;
-  question: string;
-  reasonRejected: string;
-  violatedRule: RejectedMarketRule;
-};
 
 export type AcceptedMarket = MarketQuestion & {
   criticReasoning: string;
@@ -90,18 +73,33 @@ export type ArcTrace = {
   status: 'pending' | 'simulated' | 'committed' | 'failed';
   timestamp: string;
   explorerUrl?: string;
+  artifactHash?: string;
+  sourceHash?: string;
+  chainId?: number;
 };
 
 export type TraceRecord = ArcTrace;
 
 export type PipelineStep = {
-  id: 'extraction' | 'ingestion' | 'context' | 'market-creator' | 'critic' | 'settlement';
+  id:
+    | 'extraction'
+    | 'ingestion'
+    | 'context'
+    | 'claim'
+    | 'resolver'
+    | 'comparison'
+    | 'market-creator'
+    | 'critic'
+    | 'circle'
+    | 'settlement'
+    | 'x402';
   title: string;
   agentName: string;
   action: string;
   reasoningSnippet: string;
   outputSummary: string;
   status: PipelineStepStatus;
+  stage: PipelineStage;
 };
 
 export type ActivityEvent = {
@@ -115,7 +113,7 @@ export type ActivityEvent = {
 
 export type PipelineErrorBrief = {
   title: string;
-  stage: PipelineStep['id'] | 'orchestrator' | 'api';
+  stage: PipelineStep['id'] | PipelineStage | 'orchestrator' | 'api' | 'network';
   statusCode?: number;
   message: string;
   likelyCause: string;
@@ -136,6 +134,9 @@ export type AgentRun = {
   rejectedMarkets: RejectedMarketReview[];
   acceptedMarket?: AcceptedMarket;
   trace?: ArcTrace;
+  circleAgentWallet?: CircleAgentWalletStatus;
+  x402?: X402PublicationStatus | null;
+  analysis?: AnalysisResult;
   analyzedInMs?: number;
   steps: PipelineStep[];
   activityFeed: ActivityEvent[];

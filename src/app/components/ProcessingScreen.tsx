@@ -3,6 +3,7 @@ import {
   Check,
   Clipboard,
   FileText,
+  ExternalLink,
   Globe2,
   Languages,
   Link,
@@ -15,7 +16,7 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { CriticVerdict, MarketQuestion, PipelineRun, PipelineStep, PipelineStepStatus } from '../pipeline/types';
+import type { CriticVerdict, MarketQuestion, PipelineRun, PipelineStep, PipelineStepStatus, SourceAnalysis } from '../pipeline/types';
 import { pageContainerClassName } from './pageLayout';
 
 type StepState = 'complete' | 'active' | 'pending' | 'failed';
@@ -67,20 +68,30 @@ const stepContentMotion = {
 
 const stepLabels: Record<PipelineStep['id'], string> = {
   extraction: 'Source Extraction',
+  claim: 'Claim Extraction',
   ingestion: 'Source Metadata',
   context: 'Translation & Context',
+  resolver: 'Resolver Verification',
+  comparison: 'Market Comparison',
   'market-creator': 'Market Drafting',
-  critic: 'Validation Review',
-  settlement: 'Trace Commit',
+  critic: 'Critic Review',
+  circle: 'Circle Wallet',
+  settlement: 'Arc Commit',
+  x402: 'x402 Publication',
 };
 
 const stepDescriptions: Record<PipelineStep['id'], string> = {
   extraction: 'The article or pasted source is prepared.',
+  claim: 'The agent extracts a concrete claim, actors, evidence, and deadline.',
   ingestion: 'The source is normalized and identified.',
   context: 'The source is translated and operational context is summarized.',
+  resolver: 'The official resolver URL is fetched and verified.',
+  comparison: 'Existing market sources are searched for close matches.',
   'market-creator': 'A binary market draft is formed.',
   critic: 'Weak candidates are rejected against validation checks.',
-  settlement: 'The audit trace is prepared for commit.',
+  circle: 'The configured ARC-TESTNET Circle wallet is checked.',
+  settlement: 'The accepted artifact hash is committed on Arc Testnet.',
+  x402: 'Paid intelligence access metadata is published.',
 };
 
 const MIN_STEP_PROCESSING_MS = 850;
@@ -700,8 +711,9 @@ function getArtifactView({
   switch (activeStep.id) {
     case 'extraction': {
       const extracted = pipelineRun.extractedSource;
-      const title = extracted ? extracted.title : looksLikeUrl(pipelineRun.sourceInput) ? 'Extracting article...' : 'Preparing pasted source.';
+      const title = getExtractionTitle(pipelineRun, activeStep);
       const description = extracted ? extracted.domain : activeStep.reasoningSnippet;
+      const sourceExcerpt = getSourceExcerpt(pipelineRun);
 
       return {
         key: activeStep.id,
@@ -717,9 +729,15 @@ function getArtifactView({
                 <ArtifactField label="Input type" value={looksLikeUrl(pipelineRun.sourceInput) ? 'Readable URL' : 'Pasted source text'} />
               </StepReveal>
               <StepReveal index={1}>
-                <ArtifactField label="Extraction status" value={extracted ? 'Article text extracted' : activeStep.status === 'running' ? 'Reading source' : 'Waiting for extracted text'} />
+                <ArtifactField label="Preparation status" value={getExtractionStatus(pipelineRun, activeStep)} />
               </StepReveal>
             </div>
+            {sourceExcerpt && (
+              <StepReveal index={2} className="mt-5 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+                <div className="eyebrow">Source excerpt</div>
+                <p className="mt-3 text-base leading-7 text-[#292824]">{sourceExcerpt}</p>
+              </StepReveal>
+            )}
             {extracted && <ExtractedSourcePreview source={extracted} />}
           </>
         ),
@@ -735,12 +753,13 @@ function getArtifactView({
 
       const source = pipelineRun.extractedSource ? `${pipelineRun.extractedSource.title} / ${pipelineRun.extractedSource.domain}` : ingestion.source;
       const fields = [
-        ['Language', `${ingestion.language} (${Math.round(ingestion.languageConfidence * 100)}%)`],
+        ['Language', `${ingestion.language} (${formatLanguageConfidence(ingestion.languageConfidence)})`],
         ['Source', source],
-        ['Topic', ingestion.topic],
+        ['Actors', getActors(ingestion.entities)],
         ['Region', ingestion.region],
+        ['Event type', ingestion.topic],
         ['Source date', ingestion.sourceDate],
-        ['Entities', ingestion.entities.join(', ')],
+        ['Normalized claim', getNormalizedClaim(ingestion)],
       ];
 
       return {
@@ -802,7 +821,7 @@ function getArtifactView({
         step: activeStep,
         eyebrow: 'Market Drafting',
         title: market.question,
-        description: market.evidenceSummary,
+        description: 'The accepted draft is framed around official action, not media pickup or market reaction.',
         icon: <Link aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2">
@@ -816,6 +835,9 @@ function getArtifactView({
               <div className="grid gap-4 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 sm:grid-cols-2">
                 <ArtifactField label="Deadline" value={market.deadline} />
                 <ArtifactField label="Resolution source" value={market.resolutionSource} />
+                <div className="sm:col-span-2">
+                  <ArtifactField label="Why this framing" value={market.evidenceSummary} />
+                </div>
               </div>
             </StepReveal>
           </div>
@@ -866,18 +888,25 @@ function getArtifactView({
       };
     }
 
-    case 'settlement': {
+    case 'settlement':
+    case 'x402': {
       const market = pipelineRun.acceptedMarket;
+      const traceCommitted = isCommittedTrace(pipelineRun.trace);
 
       if (!market) {
-        return createPendingArtifactView(activeStep, 'Trace commit is waiting for a validated market.');
+        return createPendingArtifactView(activeStep, 'Artifact publication is waiting for a validated market.');
       }
 
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: 'Trace Commit',
+        eyebrow: activeStep.id === 'x402'
+          ? pipelineRun.x402?.status === 'disabled' || !pipelineRun.x402 ? 'x402 Disabled' : 'x402 Publication'
+          : traceCommitted ? 'Arc Trace Commit' : 'Local Trace Prepared',
         title: market.question,
+        description: traceCommitted
+          ? 'The artifact hash has a live Arc transaction proof.'
+          : 'This demo run has a local trace hash only; no live Arc transaction or x402 proof is attached.',
         icon: <ShieldCheck aria-hidden="true" size={18} />,
         body: (
           <StepReveal className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E1D8] pt-6">
@@ -932,10 +961,26 @@ function getArtifactView({
             </StepReveal>
             <StepReveal index={3} className="border-t border-[#E5E1D8] pt-6 sm:col-span-2">
               <div className="grid gap-4 sm:grid-cols-3">
-                <ArtifactField label="Trace status" value={pipelineRun.trace?.status ?? 'Preparing commit'} />
-                <ArtifactField label="Network" value={pipelineRun.trace?.network ?? 'Arc testnet'} />
+                <ArtifactField label="Trace status" value={formatTraceStatus(pipelineRun.trace)} />
+                <ArtifactField label="Network" value={pipelineRun.trace?.network ?? 'Arc Testnet'} />
                 <ArtifactField label="Trace hash" value={pipelineRun.trace?.traceHash ?? 'Pending'} />
               </div>
+              {traceCommitted && pipelineRun.trace?.explorerUrl && (
+                <a href={pipelineRun.trace.explorerUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-[#305F72]">
+                  Arcscan transaction
+                  <ExternalLink aria-hidden="true" size={13} />
+                </a>
+              )}
+              {!traceCommitted && (
+                <p className="mt-4 max-w-3xl text-sm font-medium leading-6 text-[#77746B]">
+                  Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
+                </p>
+              )}
+              {(activeStep.id === 'x402' && (!pipelineRun.x402 || pipelineRun.x402.status === 'disabled')) && (
+                <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-[#77746B]">
+                  x402 is disabled for this run and is not blocking artifact review.
+                </p>
+              )}
             </StepReveal>
           </div>
         ),
@@ -1074,8 +1119,9 @@ function StepPendingArtifact({ title, description, progressRail }: { title: stri
 
 function ExtractionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: PipelineRun; step: PipelineStep; progressRail?: ReactNode }) {
   const extracted = pipelineRun.extractedSource;
-  const title = extracted ? extracted.title : looksLikeUrl(pipelineRun.sourceInput) ? 'Extracting article...' : 'Preparing pasted source.';
+  const title = getExtractionTitle(pipelineRun, step);
   const description = extracted ? extracted.domain : step.reasoningSnippet;
+  const sourceExcerpt = getSourceExcerpt(pipelineRun);
 
   return (
     <StepArtifactFrame eyebrow="Source Extraction" title={title} description={description} step={step} icon={<FileText aria-hidden="true" size={18} />} progressRail={progressRail}>
@@ -1084,9 +1130,15 @@ function ExtractionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: 
           <ArtifactField label="Input type" value={looksLikeUrl(pipelineRun.sourceInput) ? 'Readable URL' : 'Pasted source text'} />
         </StepReveal>
         <StepReveal index={1}>
-          <ArtifactField label="Extraction status" value={extracted ? 'Article text extracted' : step.status === 'running' ? 'Reading source' : 'Waiting for extracted text'} />
+          <ArtifactField label="Preparation status" value={getExtractionStatus(pipelineRun, step)} />
         </StepReveal>
       </div>
+      {sourceExcerpt && (
+        <StepReveal index={2} className="mt-5 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+          <div className="eyebrow">Source excerpt</div>
+          <p className="mt-3 text-base leading-7 text-[#292824]">{sourceExcerpt}</p>
+        </StepReveal>
+      )}
       {extracted && <ExtractedSourcePreview source={extracted} />}
     </StepArtifactFrame>
   );
@@ -1101,12 +1153,13 @@ function IngestionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: P
 
   const source = pipelineRun.extractedSource ? `${pipelineRun.extractedSource.title} / ${pipelineRun.extractedSource.domain}` : ingestion.source;
   const fields = [
-    ['Language', `${ingestion.language} (${Math.round(ingestion.languageConfidence * 100)}%)`],
+    ['Language', `${ingestion.language} (${formatLanguageConfidence(ingestion.languageConfidence)})`],
     ['Source', source],
-    ['Topic', ingestion.topic],
+    ['Actors', getActors(ingestion.entities)],
     ['Region', ingestion.region],
+    ['Event type', ingestion.topic],
     ['Source date', ingestion.sourceDate],
-    ['Entities', ingestion.entities.join(', ')],
+    ['Normalized claim', getNormalizedClaim(ingestion)],
   ];
 
   return (
@@ -1246,7 +1299,7 @@ function DraftArtifact({ market, step, progressRail }: { market?: MarketQuestion
   }
 
   return (
-    <StepArtifactFrame eyebrow="Market Drafting" title={market.question} description={market.evidenceSummary} step={step} icon={<Link aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Market Drafting" title={market.question} description="The accepted draft is framed around official action, not media pickup or market reaction." step={step} icon={<Link aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2">
         <StepReveal>
           <Criteria label="YES" value={market.yesCriteria} />
@@ -1258,6 +1311,9 @@ function DraftArtifact({ market, step, progressRail }: { market?: MarketQuestion
           <div className="grid gap-4 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 sm:grid-cols-2">
             <ArtifactField label="Deadline" value={market.deadline} />
             <ArtifactField label="Resolution source" value={market.resolutionSource} />
+            <div className="sm:col-span-2">
+              <ArtifactField label="Why this framing" value={market.evidenceSummary} />
+            </div>
           </div>
         </StepReveal>
       </div>
@@ -1352,8 +1408,11 @@ function FinalArtifact({
 
   return (
     <StepArtifactFrame
-      eyebrow="Trace Commit"
+      eyebrow={isCommittedTrace(pipelineRun.trace) ? 'Trace Commit' : 'Local Trace Prepared'}
       title={market.question}
+      description={isCommittedTrace(pipelineRun.trace)
+        ? 'The artifact hash has a live Arc transaction proof.'
+        : 'This demo run has a local trace hash only; no live Arc transaction or x402 proof is attached.'}
       step={step}
       icon={<ShieldCheck aria-hidden="true" size={18} />}
       progressRail={progressRail}
@@ -1374,10 +1433,15 @@ function FinalArtifact({
           </StepReveal>
           <StepReveal index={3} className="border-t border-[#E5E1D8] pt-6 sm:col-span-2">
             <div className="grid gap-4 sm:grid-cols-3">
-              <ArtifactField label="Trace status" value={pipelineRun.trace?.status ?? 'Preparing commit'} />
-              <ArtifactField label="Network" value={pipelineRun.trace?.network ?? 'Arc testnet'} />
+              <ArtifactField label="Trace status" value={formatTraceStatus(pipelineRun.trace)} />
+              <ArtifactField label="Network" value={pipelineRun.trace?.network ?? 'Arc Testnet'} />
               <ArtifactField label="Trace hash" value={pipelineRun.trace?.traceHash ?? 'Pending'} />
             </div>
+            {!isCommittedTrace(pipelineRun.trace) && (
+              <p className="mt-4 max-w-3xl text-sm font-medium leading-6 text-[#77746B]">
+                Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
+              </p>
+            )}
           </StepReveal>
         </div>
       }
@@ -1445,6 +1509,55 @@ function ArtifactField({ label, value }: { label: string; value: string }) {
   );
 }
 
+function getExtractionTitle(run: PipelineRun, step: PipelineStep): string {
+  if (run.extractedSource) return run.extractedSource.title;
+  if (looksLikeUrl(run.sourceInput)) return step.status === 'complete' ? 'Article source prepared.' : 'Extracting article...';
+  return step.status === 'complete' ? 'Source text prepared.' : 'Preparing pasted source.';
+}
+
+function getExtractionStatus(run: PipelineRun, step: PipelineStep): string {
+  if (run.extractedSource) return 'Article text extracted';
+  if (looksLikeUrl(run.sourceInput)) return step.status === 'running' ? 'Reading source' : 'URL prepared';
+  return step.status === 'running' ? 'Preparing pasted text' : 'Source text prepared';
+}
+
+function getSourceExcerpt(run: PipelineRun): string {
+  const text = run.extractedSource?.text ?? run.sourceInput;
+  const normalizedText = text.trim().replace(/\s+/g, ' ');
+
+  if (!normalizedText) return '';
+  return normalizedText.length > 230 ? `${normalizedText.slice(0, 227)}...` : normalizedText;
+}
+
+function formatLanguageConfidence(value: number): string {
+  const normalizedValue = value > 1 ? value : value * 100;
+  return `${Math.round(normalizedValue)}%`;
+}
+
+function getActors(entities: string[]): string {
+  return entities.filter((entity) => !['Turkey', 'Argentina', 'Chile', 'Japan'].includes(entity)).join(', ') || 'Not provided';
+}
+
+function getNormalizedClaim(ingestion: SourceAnalysis): string {
+  if (ingestion.region === 'Turkey') {
+    return 'TCMB may publish an emergency liquidity or policy-rate intervention before the stated deadline.';
+  }
+
+  if (ingestion.region === 'Argentina' && ingestion.topic.includes('Currency')) {
+    return 'Argentina may officially remove remaining currency controls before the stated deadline.';
+  }
+
+  if (ingestion.region === 'Chile') {
+    return 'Chile may publish an official lithium extraction permit decision before the stated deadline.';
+  }
+
+  if (ingestion.region === 'Japan') {
+    return 'Japan may extend household electricity subsidies before the stated deadline.';
+  }
+
+  return `${ingestion.region} may officially confirm ${ingestion.topic.toLowerCase()} before the stated deadline.`;
+}
+
 function getCompletedStepDwellMs(run: PipelineRun, step?: PipelineStep): number {
   const readableText = getReadableStepText(run, step);
   const wordCount = countWords(readableText);
@@ -1510,6 +1623,7 @@ function getReadableStepText(run: PipelineRun, step?: PipelineStep): string {
         ].filter(Boolean).join(' ');
       }).join(' ');
     case 'settlement':
+    case 'x402':
       return [
         run.acceptedMarket?.question,
         run.acceptedMarket?.yesCriteria,
@@ -1520,6 +1634,8 @@ function getReadableStepText(run: PipelineRun, step?: PipelineStep): string {
         run.trace?.status,
         run.trace?.network,
         run.trace?.traceHash,
+        run.x402?.status,
+        run.x402?.intelligenceUrl,
       ].filter(Boolean).join(' ');
     default:
       return [step.outputSummary, step.reasoningSnippet].filter(Boolean).join(' ');
@@ -1583,7 +1699,7 @@ function getPresentationTarget(run: PipelineRun): { index: number; status: Pipel
 }
 
 function isPipelineStepId(value: string): value is PipelineStep['id'] {
-  return ['extraction', 'ingestion', 'context', 'market-creator', 'critic', 'settlement'].includes(value);
+  return ['extraction', 'ingestion', 'context', 'claim', 'resolver', 'comparison', 'market-creator', 'critic', 'circle', 'settlement', 'x402'].includes(value);
 }
 
 function getLastCompleteStepIndex(steps: PipelineStep[]): number {
@@ -1617,6 +1733,16 @@ function formatMarketForCopy(run: PipelineRun): string {
     `Resolution source: ${market.resolutionSource}`,
     `Evidence: ${market.evidenceSummary}`,
   ].join('\n');
+}
+
+function isCommittedTrace(trace: PipelineRun['trace']) {
+  return trace?.status === 'committed' && Boolean(trace.transactionId?.startsWith('0x')) && Boolean(trace.explorerUrl);
+}
+
+function formatTraceStatus(trace: PipelineRun['trace']) {
+  if (isCommittedTrace(trace)) return `Committed transaction ${trace?.transactionId}`;
+  if (trace) return 'Local trace prepared; no Arc transaction submitted';
+  return 'Preparing commit';
 }
 
 function formatErrorForCopy(run: PipelineRun): string {

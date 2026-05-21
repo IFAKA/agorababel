@@ -69,7 +69,7 @@ export class SimulatedPipelineProvider implements PipelineProvider {
       });
 
       run = updateRun(run, { status: 'trace-committed', trace });
-      run = appendActivity(run, 'Audit Trace', 'committed', 'Trace hash generated from structured analysis outputs.', 'Local audit trace prepared for Arc testnet commit.');
+      run = appendActivity(run, 'Audit Trace', 'committed', 'Local trace hash generated from structured analysis outputs.', 'This demo creates a verifiable local hash but does not submit an Arc transaction.');
       yield { type: 'trace-committed', run, trace };
 
       run = updateRun(run, { status: 'complete' });
@@ -130,9 +130,9 @@ export async function createArcTrace(agentRun: AgentRun | TracePayload): Promise
 
   return {
     traceHash: `sha256:${traceHash}`,
-    transactionId: 'Prepared for Arc testnet commit',
-    network: 'Local trace hash',
-    status: 'pending',
+    transactionId: 'Local trace prepared; no Arc transaction submitted',
+    network: 'Uncommitted local demo trace',
+    status: 'simulated',
     timestamp: new Date().toISOString(),
   };
 }
@@ -217,9 +217,9 @@ export function createDemoArtifactRun(): PipelineRun {
     analyzedInMs: 0,
     trace: {
       traceHash: `local:${traceHash}`,
-      transactionId: 'Prepared for Arc testnet commit',
-      network: 'Local trace hash',
-      status: 'pending',
+      transactionId: 'Local trace prepared; no Arc transaction submitted',
+      network: 'Uncommitted local demo trace',
+      status: 'simulated',
       timestamp: now,
     },
     activityFeed: [
@@ -227,9 +227,9 @@ export function createDemoArtifactRun(): PipelineRun {
         id: `activity-${traceHash}-local-trace`,
         timestamp: now,
         agentName: 'Audit Trace',
-        status: 'committed',
-        message: 'Trace hash generated from structured analysis outputs.',
-        reasoningSnippet: 'Local audit trace prepared for Arc testnet commit.',
+        status: 'failed',
+        message: 'Bundled demo artifact has no Arc transaction proof.',
+        reasoningSnippet: 'Run live analysis with production Arc and Circle configuration for committed proof.',
       },
       ...resolvedRun.activityFeed,
     ],
@@ -243,7 +243,7 @@ function createQueuedPipelineSteps(): PipelineStep[] {
     createStep('context', 'Translation & Context', 'Translation & Context', 'Translate the report and identify market relevance.', 'Waiting for source extraction.', 'Context summary will appear after translation.'),
     createStep('market-creator', 'Market Drafting', 'Market Drafting', 'Generate objective, binary, time-bounded market candidates from the source.', 'Waiting for translated context.', 'Candidate markets will appear after drafting.'),
     createStep('critic', 'Validation Review', 'Validation Review', 'Reject weak candidates and approve only markets with clear criteria and public resolution.', 'Waiting for candidates.', 'Validation results will appear after review.'),
-    createStep('settlement', 'Trace Commit', 'Audit Trace', 'Package the accepted market with a local trace hash.', 'Waiting for an accepted market.', 'Trace hash will appear after artifact packaging.'),
+    createStep('settlement', 'Arc Trace Commit', 'Audit Trace', 'Commit the accepted artifact hash to Arc Testnet.', 'Waiting for an accepted market.', 'Arc transaction proof appears only after a live commit.'),
   ];
 }
 
@@ -302,10 +302,10 @@ function ingestSource(sourceInput: string): SourceAnalysis {
   return {
     signalName: region === 'Unknown' ? topic : `${region} ${topic}`,
     language,
-    languageConfidence: language === 'English' ? 88 : 97,
+    languageConfidence: language === 'English' ? 0.88 : 0.97,
     source,
     sourceUrl: looksLikeUrl(sourceInput) ? sourceInput : undefined,
-    sourceDate: detectDate(sourceInput) ?? '2026-05-14',
+    sourceDate: detectSourceDate(sourceInput),
     entities,
     region,
     topic,
@@ -315,7 +315,7 @@ function ingestSource(sourceInput: string): SourceAnalysis {
 function createContext(ingestion: SourceAnalysis): ContextAnalysis {
   const deadline = defaultDeadline(ingestion);
   const englishSummary = ingestion.region === 'Turkey'
-    ? `Local Turkish reporting says TCMB officials are preparing an emergency rate or liquidity intervention before ${deadline}, with any qualifying action expected through an official central-bank publication.`
+    ? `Dunya says TCMB officials are preparing an emergency liquidity and policy-rate intervention before ${deadline}, with any qualifying decision expected on the official TCMB page.`
     : ingestion.region === 'Argentina' && ingestion.topic.includes('Currency')
     ? `Officials close to Argentina's central bank say the government is evaluating removal of currency controls before ${deadline}, contingent on an official decree.`
     : ingestion.region === 'Chile'
@@ -327,8 +327,10 @@ function createContext(ingestion: SourceAnalysis): ContextAnalysis {
   return {
     englishSummary,
     marketRelevance: ingestion.region === 'Unknown' ? 'Medium' : 'High',
-    relevanceExplanation: 'The signal is useful because it appears in local-language financial press before broad English coverage, names an authority, gives a deadline, and can resolve against a public source.',
-    evidenceSummary: `${ingestion.source} mentions ${ingestion.entities.join(', ')} in ${ingestion.region}; the claim contains a public authority and a deadline candidate.`,
+    relevanceExplanation: 'The signal is useful because it appears in local-language financial press before broad English coverage, names the authority, gives a deadline, and can resolve against an official public source.',
+    evidenceSummary: ingestion.region === 'Turkey'
+      ? 'Dunya names TCMB sources, an emergency liquidity or rate intervention, the 2026-06-15 deadline, and official publication on the TCMB site.'
+      : `${ingestion.source} mentions ${ingestion.entities.join(', ')} in ${ingestion.region}; the claim contains a public authority and a deadline candidate.`,
   };
 }
 
@@ -344,7 +346,7 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
       noCriteria: `NO if ${resolutionSource} has not published a qualifying confirmation before ${deadline}, or publishes a rejection or delay beyond ${deadline}.`,
       deadline,
       resolutionSource,
-      evidenceSummary: context.evidenceSummary,
+      evidenceSummary: `${context.evidenceSummary} This draft resolves on the authority's official action, not whether media coverage spreads or prices move.`,
       confidenceScore: 82,
     },
     {
@@ -354,7 +356,7 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
       noCriteria: 'NO otherwise.',
       deadline,
       resolutionSource: 'Major English-language news coverage',
-      evidenceSummary: 'Rejected candidate included to show validation filtering out source-lag and coverage-dependent wording.',
+      evidenceSummary: 'Rejected because English-language coverage would measure downstream attention rather than the official TCMB action.',
       confidenceScore: 55,
     },
     {
@@ -364,7 +366,7 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
       noCriteria: 'NO if they do not.',
       deadline,
       resolutionSource: 'Market price movement',
-      evidenceSummary: 'Rejected candidate included because the system requires objective public outcomes, not price direction.',
+      evidenceSummary: 'Rejected because lira or asset-price movement can be noisy and subjective even if the policy action is clear.',
       confidenceScore: 31,
     },
   ];
@@ -383,7 +385,7 @@ function createCriticReviews(drafts: MarketQuestion[]): CriticVerdict[] {
           evidence: 'pass',
           resolutionSource: 'pass',
         },
-        reasoning: 'Accepted: binary action, official source, explicit deadline, and evidence tied back to the original report.',
+        reasoning: 'Accepted: asks whether TCMB or the named authority takes an official action by the deadline, with YES/NO criteria tied to a public resolver.',
       };
     }
 
@@ -398,7 +400,7 @@ function createCriticReviews(drafts: MarketQuestion[]): CriticVerdict[] {
           evidence: 'pass',
           resolutionSource: 'fail',
         },
-        reasoning: 'Rejected: coverage by English-language outlets is a proxy for attention, not the underlying event resolution.',
+        reasoning: 'Rejected: English-language coverage could lag, omit, or reframe the Turkish report; it is not the official source of resolution.',
         violatedRule: 'weak resolution',
       };
     }
@@ -413,7 +415,7 @@ function createCriticReviews(drafts: MarketQuestion[]): CriticVerdict[] {
         evidence: 'fail',
         resolutionSource: 'fail',
       },
-      reasoning: 'Rejected: asks for market reaction and profit-adjacent direction instead of an objective real-world outcome.',
+      reasoning: 'Rejected: price direction depends on many drivers and cannot prove whether the official policy action occurred.',
       violatedRule: 'subjective wording',
     };
   });
@@ -454,12 +456,12 @@ function createPipelineSteps(
   const acceptedCount = reviews.filter((review) => review.decision === 'accepted').length;
 
   return [
-    createStep('extraction', 'Source Extraction', 'Source Extraction', 'Prepare submitted text or article content for analysis.', 'Source text is available for analysis.', 'Prepared source content for language and entity detection.'),
-    createStep('ingestion', 'Source Metadata', 'Source Metadata', 'Parse language, source, date, entities, region, and source credibility.', `${ingestion.language} source with ${ingestion.entities.length} extracted entities and a named local outlet.`, `${ingestion.language} from ${ingestion.source}; region ${ingestion.region}; topic ${ingestion.topic}.`),
+    createStep('extraction', 'Source Extraction', 'Source Extraction', 'Prepare submitted text or article content for analysis.', 'Source text is available for analysis.', 'Source text prepared with a short excerpt for downstream checks.'),
+    createStep('ingestion', 'Source Metadata', 'Source Metadata', 'Parse language, outlet, actors, region, event type, and normalized claim.', `${ingestion.language} source with ${ingestion.entities.length} extracted entities and a named local outlet.`, `${ingestion.language} from ${ingestion.source}; ${ingestion.topic} in ${ingestion.region}.`),
     createStep('context', 'Translation & Context', 'Translation & Context', 'Translate the report and identify market relevance.', context.relevanceExplanation, context.englishSummary),
-    createStep('market-creator', 'Market Drafting', 'Market Drafting', 'Generate objective, binary, time-bounded market candidates from the source.', `${drafts.length} candidate markets generated; one uses official-action resolution instead of English-news lag.`, `Drafted ${drafts.length} YES/NO candidates including "${acceptedMarket.question}"`),
+    createStep('market-creator', 'Market Drafting', 'Market Drafting', 'Generate objective, binary, time-bounded market candidates from the source.', `${drafts.length} candidate markets generated; the accepted draft resolves on official action, not coverage or price movement.`, `Drafted ${drafts.length} YES/NO candidates including "${acceptedMarket.question}"`),
     createStep('critic', 'Validation Review', 'Validation Review', 'Reject weak candidates and approve only markets with clear criteria and public resolution.', `${acceptedCount}/${reviews.length} candidates accepted after ambiguity, evidence, and resolution checks.`, acceptedMarket.criticReasoning),
-    createStep('settlement', 'Trace Commit', 'Audit Trace', 'Package the accepted market with a local trace hash.', 'Prepared for Arc testnet commit.', 'Trace hash generated from structured analysis outputs.'),
+    createStep('settlement', 'Arc Trace Commit', 'Audit Trace', 'Prepare the accepted artifact hash for Arc proof.', 'This local demo produces a trace hash but does not submit an Arc transaction.', 'Local trace hash prepared; no Arc transaction proof or x402 publication is attached.'),
   ];
 }
 
@@ -479,7 +481,20 @@ function createStep(
     reasoningSnippet,
     outputSummary,
     status: 'pending',
+    stage: inferStageFromStepId(id),
   };
+}
+
+function inferStageFromStepId(id: PipelineStep['id']): PipelineStep['stage'] {
+  if (id === 'extraction') return 'source-extraction';
+  if (id === 'ingestion' || id === 'context' || id === 'claim') return 'claim-extraction';
+  if (id === 'resolver') return 'resolver-verification';
+  if (id === 'comparison') return 'market-comparison';
+  if (id === 'market-creator') return 'market-drafting';
+  if (id === 'critic') return 'critic-review';
+  if (id === 'circle') return 'circle-wallet';
+  if (id === 'settlement') return 'arc-trace-commit';
+  return 'x402-publication';
 }
 
 function updateStep(run: PipelineRun, stepId: PipelineStep['id'], status: PipelineStepStatus): PipelineRun {
@@ -571,9 +586,11 @@ function createQuestion(ingestion: SourceAnalysis, deadline: string): string {
   return `Will the named authority officially confirm ${ingestion.topic.toLowerCase()} before ${deadline}?`;
 }
 
-function detectDate(sourceInput: string): string | undefined {
-  const match = sourceInput.match(/\b(202[6-9]-\d{2}-\d{2})\b/);
-  return match?.[1];
+function detectSourceDate(sourceInput: string): string {
+  if (sourceInput.trim() === sampleArticle.sourceText) return sampleArticle.sourceDate;
+
+  const explicitPublishedDate = sourceInput.match(/\b(?:published|dated|reported on)\s+(202[6-9]-\d{2}-\d{2})\b/i);
+  return explicitPublishedDate?.[1] ?? 'Not provided';
 }
 
 function looksLikeUrl(value: string): boolean {

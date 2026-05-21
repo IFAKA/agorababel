@@ -1,11 +1,10 @@
-import { AnalysisResultSchema, type AnalysisResult } from './analysisSchema';
+import { AnalysisResultSchema, type AnalysisResult, type PipelineStage } from './analysisSchema';
 import { createPendingPipelineRun, createSubmission } from './simulatedProvider';
 import type {
   AcceptedMarket,
   ActivityEvent,
   ArcTrace,
   ContextAnalysis,
-  CriticVerdict,
   PipelineInput,
   PipelineErrorBrief,
   PipelineProvider,
@@ -20,50 +19,57 @@ const STAGE_PACING_ENABLED = import.meta.env.VITE_DEMO_PACING === 'true';
 const STAGE_MIN_MS = 850;
 let activitySequence = 0;
 
+const stageOrder: PipelineStep[] = [
+  createStep('extraction', 'Source Extraction', 'Source Extractor', 'Extract readable source text. URL inputs must produce real article text.', 'Waiting for submitted evidence.', 'No source extracted yet.', 'source-extraction'),
+  createStep('claim', 'Claim Extraction', 'Claim Extractor', 'Extract event claim, actors, source language, evidence snippets, and deadline.', 'Waiting for source extraction.', 'No claim extracted yet.', 'claim-extraction'),
+  createStep('resolver', 'Resolver Verification', 'Resolver Verifier', 'Fetch and verify the exact official resolver URL.', 'Waiting for claim extraction.', 'No resolver verified yet.', 'resolver-verification'),
+  createStep('comparison', 'Market Comparison', 'Market Scout', 'Check configured market sources for similar existing markets.', 'Waiting for resolver verification.', 'No novelty check completed yet.', 'market-comparison'),
+  createStep('market-creator', 'Market Drafting', 'Market Drafter', 'Draft one supported candidate and source-specific rejected alternatives.', 'Waiting for market comparison.', 'No market drafted yet.', 'market-drafting'),
+  createStep('critic', 'Critic Review', 'Critic', 'Enforce binary wording, deadline, official resolver, novelty, and placeholder checks.', 'Waiting for drafted candidates.', 'No critic verdict yet.', 'critic-review'),
+  createStep('circle', 'Circle Wallet', 'Circle Wallet Agent', 'Verify the configured Circle Developer-Controlled ARC-TESTNET wallet.', 'Waiting for accepted critic verdict.', 'No Circle wallet proof yet.', 'circle-wallet'),
+  createStep('settlement', 'Arc Trace Commit', 'Arc Committer', 'Commit the accepted artifact hash to the Arc Testnet trace registry.', 'Waiting for Circle readiness.', 'No Arc transaction yet.', 'arc-trace-commit'),
+  createStep('x402', 'x402 Publication', 'x402 Publisher', 'Publish paid intelligence metadata for agent-to-agent artifact access.', 'Waiting for Arc commit.', 'No x402 publication yet.', 'x402-publication'),
+];
+
 export class ApiPipelineProvider implements PipelineProvider {
   async *run(input: PipelineInput): AsyncGenerator<PipelineRunUpdate> {
     const startedAt = performance.now();
     const submission = createSubmission(input.sourceText);
-    let run = createPendingPipelineRun(submission.sourceText, submission);
+    let run = updateRun(createPendingPipelineRun(submission.sourceText, submission), {
+      status: 'running',
+      steps: stageOrder,
+    });
 
-    run = updateRun(run, { status: 'running' });
-    run = appendActivity(run, 'Source Analysis', 'running', 'Run started from submitted source.', 'The API will validate the source before any market artifact is shown.');
+    emitProductEvent('source_submitted', { runId: run.id, sourceType: looksLikeUrl(input.sourceText) ? 'url' : 'text' });
+    run = appendActivity(run, 'Source Queue', 'running', 'No-fallback analysis started.', 'The API must return verified evidence, Circle wallet proof, Arc commit, and x402 metadata before accepting a market.');
     yield { type: 'run-started', run };
 
     try {
-      const extractionStep = createExtractionStep(submission.sourceText);
-      run = hydrateStep(run, extractionStep);
-      run = updateStep(run, 'extraction', 'running');
-      run = appendActivity(run, extractionStep.agentName, 'running', extractionStep.action, extractionStep.reasoningSnippet);
-      const extractionStartedAt = performance.now();
-      yield { type: 'step-started', run, step: run.steps.find((item) => item.id === 'extraction')! };
-
+      const apiStartedAt = performance.now();
       let analysis: AnalysisResult;
+
       try {
         analysis = await analyzeSource(submission.sourceText);
       } catch (error) {
-        await paceStage(extractionStartedAt);
-        const brief = createPipelineErrorBrief(error, 'extraction', submission.sourceText);
-        run = updateStep(run, 'extraction', 'failed');
+        const brief = createPipelineErrorBrief(error, submission.sourceText);
+        const failedStepId = stepIdForStage(brief.stage);
+
+        await paceStage(apiStartedAt);
+        run = markStepsThroughFailure(run, failedStepId);
         run = updateRun(run, { status: 'failed', error: brief.message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
-        run = appendActivity(run, extractionStep.agentName, 'failed', brief.message, brief.likelyCause);
-        yield { type: 'step-completed', run, step: run.steps.find((item) => item.id === 'extraction')! };
+        run = appendActivity(run, labelForStep(failedStepId), 'failed', brief.message, brief.likelyCause);
+        emitProductEvent('analysis_failed', { runId: run.id, stage: String(brief.stage), sourceType: looksLikeUrl(input.sourceText) ? 'url' : 'text' });
+        yield { type: 'step-completed', run, step: run.steps.find((step) => step.id === failedStepId)! };
         yield { type: 'run-failed', run, error: brief.message };
         return;
       }
 
-      const resolvedRun = createRunFromAnalysis(run, analysis);
-      await paceStage(extractionStartedAt);
-      run = hydrateStep(run, resolvedRun.steps.find((step) => step.id === 'extraction')!);
-      run = revealStepArtifacts(run, resolvedRun, 'extraction');
-      run = updateStep(run, 'extraction', 'complete');
-      run = appendActivity(run, extractionStep.agentName, 'complete', resolvedRun.steps.find((step) => step.id === 'extraction')!.outputSummary, resolvedRun.steps.find((step) => step.id === 'extraction')!.reasoningSnippet);
-      yield { type: 'step-completed', run, step: run.steps.find((item) => item.id === 'extraction')! };
+      const resolvedRun = createRunFromAnalysis(run, analysis, elapsedMs(startedAt));
 
-      for (const step of resolvedRun.steps.filter((item) => item.id !== 'extraction' && item.id !== 'settlement')) {
+      for (const step of resolvedRun.steps) {
         run = hydrateStep(run, step);
-        run = updateStep(run, step.id, step.status === 'failed' ? 'failed' : 'running');
-        run = appendActivity(run, step.agentName, run.steps.find((item) => item.id === step.id)!.status, step.action, step.reasoningSnippet);
+        run = updateStep(run, step.id, 'running');
+        run = appendActivity(run, step.agentName, 'running', step.action, step.reasoningSnippet);
         const stageStartedAt = performance.now();
         yield { type: 'step-started', run, step: run.steps.find((item) => item.id === step.id)! };
 
@@ -79,37 +85,27 @@ export class ApiPipelineProvider implements PipelineProvider {
         }
       }
 
-      if (!resolvedRun.acceptedMarket) {
-        const message = analysis.rejectionReason ?? 'The input was rejected because no deadlineable public event could be validated.';
-        const brief = createRejectionBrief(message, analysis.criticVerdict.reasoning, submission.sourceText);
+      if (analysis.status !== 'accepted' || !resolvedRun.acceptedMarket || !resolvedRun.trace || resolvedRun.trace.status !== 'committed') {
+        const message = analysis.rejectionReason ?? 'The API rejected the market before acceptance.';
+        const brief = createRejectionBrief(message, analysis.stage, submission.sourceText);
         run = updateRun(run, { status: 'failed', error: message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
-        run = appendActivity(run, 'Validation Review', 'rejected', message, analysis.criticVerdict.reasoning);
+        emitProductEvent('analysis_failed', { runId: run.id, stage: analysis.stage });
         yield { type: 'run-failed', run, error: message };
         return;
       }
 
-      const settlementStep = resolvedRun.steps.find((step) => step.id === 'settlement')!;
-      run = hydrateStep(run, settlementStep);
-      run = updateStep(run, 'settlement', 'running');
-      run = appendActivity(run, settlementStep.agentName, 'running', settlementStep.action, settlementStep.reasoningSnippet);
-      const traceStartedAt = performance.now();
-      yield { type: 'step-started', run, step: run.steps.find((item) => item.id === 'settlement')! };
-
-      const trace = await createLocalTrace(analysis);
-      await paceStage(traceStartedAt);
-      run = updateStep(run, 'settlement', 'complete');
-      run = updateRun(run, { status: 'trace-committed', trace, analyzedInMs: elapsedMs(startedAt) });
-      run = appendActivity(run, 'Audit Trace', 'committed', 'Trace hash generated from structured analysis outputs.', 'Local audit trace prepared for Arc testnet commit.');
-      yield { type: 'step-completed', run, step: run.steps.find((item) => item.id === 'settlement')! };
-      yield { type: 'trace-committed', run, trace };
+      run = updateRun(run, { status: 'trace-committed', trace: resolvedRun.trace });
+      yield { type: 'trace-committed', run, trace: resolvedRun.trace };
 
       run = updateRun(run, { status: 'complete', analyzedInMs: elapsedMs(startedAt) });
-      run = appendActivity(run, 'Artifact Generation', 'accepted', 'Validated market artifact is ready.', resolvedRun.acceptedMarket.criticReasoning);
+      run = appendActivity(run, 'Artifact Generation', 'accepted', 'Verified market intelligence artifact is ready.', resolvedRun.acceptedMarket.criticReasoning);
+      emitProductEvent('market_accepted', { runId: run.id, artifactId: resolvedRun.acceptedMarket.id });
       yield { type: 'run-completed', run };
     } catch (error) {
-      const brief = createPipelineErrorBrief(error, 'orchestrator', submission.sourceText);
+      const brief = createPipelineErrorBrief(error, submission.sourceText);
       run = updateRun(run, { status: 'failed', error: brief.message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
-      run = appendActivity(run, 'Source Analysis', 'failed', brief.message, brief.likelyCause);
+      run = appendActivity(run, 'Orchestrator', 'failed', brief.message, brief.likelyCause);
+      emitProductEvent('analysis_failed', { runId: run.id, stage: String(brief.stage) });
       yield { type: 'run-failed', run, error: brief.message };
     }
   }
@@ -143,7 +139,7 @@ async function analyzeSource(sourceText: string): Promise<AnalysisResult> {
       undefined,
       'network',
       'The Vite API middleware may not be running, or the local dev server could not be reached.',
-      ['Run pnpm dev from the repository root and retry the request.', 'Check the browser console and terminal output for network or server startup errors.'],
+      ['Run pnpm dev from the repository root and retry.'],
     );
   }
 
@@ -151,19 +147,13 @@ async function analyzeSource(sourceText: string): Promise<AnalysisResult> {
 
   if (!response.ok) {
     const errorPayload = parseErrorPayload(payload);
-    throw new AnalysisRequestError(
-      errorPayload.message,
-      response.status,
-      errorPayload.stage,
-      errorPayload.likelyCause,
-      errorPayload.details,
-    );
+    throw new AnalysisRequestError(errorPayload.message, response.status, errorPayload.stage, errorPayload.likelyCause, errorPayload.details);
   }
 
   const parsed = AnalysisResultSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AnalysisRequestError(
-      'The API returned an invalid analysis payload.',
+      'The API returned an invalid strict artifact payload.',
       response.status,
       'response-validation',
       'The backend response did not match AnalysisResultSchema.',
@@ -172,6 +162,180 @@ async function analyzeSource(sourceText: string): Promise<AnalysisResult> {
   }
 
   return parsed.data;
+}
+
+function createRunFromAnalysis(run: PipelineRun, analysis: AnalysisResult, analyzedInMs: number): PipelineRun {
+  const ingestion = createSourceAnalysis(analysis);
+  const context = createContextAnalysis(analysis);
+  const acceptedMarket: AcceptedMarket | undefined = analysis.acceptedMarket
+    ? { ...toClientMarket(analysis.acceptedMarket), criticReasoning: analysis.criticVerdict.reasoning }
+    : undefined;
+  const trace = analysis.arcTrace ? toClientTrace(analysis) : undefined;
+
+  return updateRun(run, {
+    id: analysis.runId,
+    extractedSource: analysis.source.url ? {
+      title: analysis.source.title,
+      domain: analysis.source.domain ?? new URL(analysis.source.url).hostname,
+      url: analysis.source.url,
+      text: analysis.claim.evidence.map((item) => item.text).join('\n\n'),
+    } : undefined,
+    ingestion,
+    context,
+    candidateMarkets: analysis.candidateMarkets.map(toClientMarket),
+    criticReviews: [analysis.criticVerdict],
+    rejectedMarkets: analysis.rejectedMarkets,
+    acceptedMarket,
+    trace,
+    circleAgentWallet: analysis.circleAgentWallet,
+    x402: analysis.x402,
+    analysis,
+    analyzedInMs,
+    steps: createPipelineSteps(analysis),
+  });
+}
+
+function createSourceAnalysis(analysis: AnalysisResult): SourceAnalysis {
+  return {
+    signalName: analysis.acceptedMarket?.question ?? analysis.claim.summary,
+    language: analysis.source.language,
+    languageConfidence: 100,
+    source: analysis.source.domain ?? analysis.source.title,
+    sourceUrl: analysis.source.url ?? undefined,
+    sourceDate: analysis.source.publishedAt?.slice(0, 10) ?? 'Unpublished or unavailable',
+    entities: analysis.claim.actors,
+    region: analysis.claim.region,
+    topic: analysis.claim.eventType,
+  };
+}
+
+function createContextAnalysis(analysis: AnalysisResult): ContextAnalysis {
+  return {
+    englishSummary: analysis.claim.summary,
+    marketRelevance: analysis.status === 'accepted' ? 'High' : 'Low',
+    relevanceExplanation: analysis.marketComparison.reasoning,
+    evidenceSummary: analysis.claim.evidence.map((item) => item.text).join(' '),
+  };
+}
+
+function createPipelineSteps(analysis: AnalysisResult): PipelineStep[] {
+  const failedStage = analysis.status === 'rejected' ? analysis.stage : null;
+  return stageOrder.map((step) => {
+    const status = failedStage && step.stage === failedStage ? 'failed' : 'complete';
+    return {
+      ...step,
+      status,
+      reasoningSnippet: outputForStage(analysis, step.stage, 'reasoning'),
+      outputSummary: outputForStage(analysis, step.stage, 'summary'),
+    };
+  });
+}
+
+function outputForStage(analysis: AnalysisResult, stage: PipelineStage, mode: 'reasoning' | 'summary') {
+  switch (stage) {
+    case 'source-extraction':
+      return mode === 'summary'
+        ? `${analysis.source.title}${analysis.source.domain ? ` from ${analysis.source.domain}` : ''}.`
+        : `${analysis.source.inputType.toUpperCase()} input hashed as ${analysis.source.extractedTextHash.slice(0, 12)}...`;
+    case 'claim-extraction':
+      return mode === 'summary'
+        ? `${analysis.claim.eventType} in ${analysis.claim.region}; deadline ${analysis.claim.deadline}.`
+        : analysis.claim.summary;
+    case 'resolver-verification':
+      return mode === 'summary' ? `${analysis.resolver.name} verified.` : analysis.resolver.verificationEvidence;
+    case 'market-comparison':
+      return mode === 'summary' ? `Novelty verdict: ${analysis.marketComparison.noveltyVerdict}.` : analysis.marketComparison.reasoning;
+    case 'market-drafting':
+      return mode === 'summary' ? analysis.candidateMarkets[0]?.question ?? 'No candidate market.' : `${analysis.rejectedMarkets.length} rejected alternatives retained.`;
+    case 'critic-review':
+      return analysis.criticVerdict.reasoning;
+    case 'circle-wallet':
+      return mode === 'summary'
+        ? `Circle wallet ${analysis.circleAgentWallet.status}.`
+        : analysis.circleAgentWallet.address ?? analysis.circleAgentWallet.error ?? 'No wallet proof.';
+    case 'arc-trace-commit':
+      return mode === 'summary'
+        ? analysis.arcTrace ? `Committed ${analysis.arcTrace.transactionHash.slice(0, 14)}...` : 'Arc commit missing.'
+        : analysis.arcTrace?.artifactHash ?? 'No artifact hash committed.';
+    case 'x402-publication':
+      return mode === 'summary'
+        ? analysis.x402 ? `x402 ${analysis.x402.status} at ${analysis.x402.intelligenceUrl}.` : 'x402 publication missing.'
+        : analysis.x402?.payToAddress ?? 'No payment address configured.';
+    default:
+      return analysis.rejectionReason ?? 'Pipeline completed.';
+  }
+}
+
+function toClientMarket(market: AnalysisResult['candidateMarkets'][number]) {
+  return {
+    ...market,
+    resolutionSource: `${market.resolverName} (${market.resolverUrl})`,
+  };
+}
+
+function toClientTrace(analysis: AnalysisResult): ArcTrace | undefined {
+  if (!analysis.arcTrace) return undefined;
+  return {
+    traceHash: analysis.arcTrace.artifactHash,
+    transactionId: analysis.arcTrace.transactionHash,
+    network: `${analysis.arcTrace.network} (${analysis.arcTrace.chainId})`,
+    status: analysis.arcTrace.status,
+    timestamp: analysis.arcTrace.committedAt,
+    explorerUrl: analysis.arcTrace.explorerUrl,
+    artifactHash: analysis.arcTrace.artifactHash,
+    sourceHash: analysis.arcTrace.sourceHash,
+    chainId: analysis.arcTrace.chainId,
+  };
+}
+
+function markStepsThroughFailure(run: PipelineRun, failedStepId: PipelineStep['id']) {
+  const failedIndex = stageOrder.findIndex((step) => step.id === failedStepId);
+  return updateRun(run, {
+    steps: stageOrder.map((step, index) => ({
+      ...step,
+      status: index < failedIndex ? 'complete' : index === failedIndex ? 'failed' : 'pending',
+    })),
+  });
+}
+
+function createPipelineErrorBrief(error: unknown, sourceText: string): PipelineErrorBrief {
+  const requestError = error instanceof AnalysisRequestError ? error : undefined;
+  const message = error instanceof Error ? error.message : 'Pipeline failed.';
+  const stage = (requestError?.stage ?? 'api') as PipelineErrorBrief['stage'];
+  const sourceKind = looksLikeUrl(sourceText) ? 'URL' : 'pasted text';
+
+  return {
+    title: 'AgoraBabel pipeline failure',
+    stage,
+    statusCode: requestError?.statusCode,
+    message,
+    likelyCause: requestError?.likelyCause ?? 'The no-fallback pipeline stopped before a verified artifact could be produced.',
+    debuggingContext: [
+      `Backend stage: ${stage}`,
+      requestError?.statusCode ? `HTTP status: ${requestError.statusCode}` : 'HTTP status: unavailable',
+      `Source type: ${sourceKind}`,
+      `Source length: ${sourceText.trim().length} characters`,
+      ...(requestError?.details ?? []),
+    ],
+    agentPrompt: [
+      'Fix this AgoraBabel no-fallback pipeline failure.',
+      `Backend stage: ${stage}.`,
+      `Error: ${message}`,
+      'Inspect src/server/analyze.ts and the stage module named in the error.',
+      'Do not add heuristic fallback acceptance.',
+    ].join('\n'),
+  };
+}
+
+function createRejectionBrief(message: string, stage: PipelineStage, sourceText: string): PipelineErrorBrief {
+  return {
+    title: 'AgoraBabel market rejection',
+    stage,
+    message,
+    likelyCause: 'The strict critic rejected the source or downstream proof failed.',
+    debuggingContext: [`Stage: ${stage}`, `Source length: ${sourceText.trim().length} characters`],
+    agentPrompt: `Investigate AgoraBabel rejection at ${stage}: ${message}`,
+  };
 }
 
 function parseErrorPayload(payload: unknown) {
@@ -197,194 +361,13 @@ function parseErrorPayload(payload: unknown) {
   };
 }
 
-function createPipelineErrorBrief(error: unknown, stage: PipelineErrorBrief['stage'], sourceText: string): PipelineErrorBrief {
-  const requestError = error instanceof AnalysisRequestError ? error : undefined;
-  const message = error instanceof Error ? error.message : 'Pipeline failed.';
-  const sourceKind = looksLikeUrl(sourceText) ? 'URL' : 'pasted text';
-  const sourcePreview = sourceText.trim().slice(0, 500);
-  const likelyCause = requestError?.likelyCause ?? 'An unexpected pipeline exception stopped the run before a validated market artifact was produced.';
-  const details = requestError?.details ?? [];
-
-  return {
-    title: 'AgoraBabel pipeline failure',
-    stage,
-    statusCode: requestError?.statusCode,
-    message,
-    likelyCause,
-    debuggingContext: [
-      `Stage: ${stage}`,
-      requestError?.stage ? `Backend stage: ${requestError.stage}` : 'Backend stage: unavailable',
-      requestError?.statusCode ? `HTTP status: ${requestError.statusCode}` : 'HTTP status: unavailable',
-      `Source type: ${sourceKind}`,
-      `Source length: ${sourceText.trim().length} characters`,
-      `Source preview: ${sourcePreview || '[empty]'}`,
-      ...details,
-    ],
-    agentPrompt: [
-      'Fix this AgoraBabel SaaS failure.',
-      `Failure stage: ${stage}.`,
-      requestError?.stage ? `Backend stage: ${requestError.stage}.` : 'Backend stage was not available.',
-      requestError?.statusCode ? `HTTP status: ${requestError.statusCode}.` : 'HTTP status was not available.',
-      `Error message: ${message}`,
-      `Likely cause: ${likelyCause}`,
-      'Relevant files to inspect first: src/server/analyze.ts, src/app/pipeline/apiProvider.ts, src/app/pipeline/analysisSchema.ts, and src/app/components/ProcessingScreen.tsx.',
-      'Keep the fix focused, preserve the existing Vite React pipeline flow, then run pnpm build.',
-    ].join('\n'),
-  };
+function stepIdForStage(stage: PipelineErrorBrief['stage']): PipelineStep['id'] {
+  const found = stageOrder.find((step) => step.stage === stage);
+  return found?.id ?? 'extraction';
 }
 
-function createRejectionBrief(message: string, criticReasoning: string, sourceText: string): PipelineErrorBrief {
-  return {
-    title: 'AgoraBabel market rejection',
-    stage: 'critic',
-    message,
-    likelyCause: 'The source was processed successfully, but the critic did not find a public, objective, deadlineable YES/NO market.',
-    debuggingContext: [
-      'Stage: critic',
-      'HTTP status: 200',
-      `Source length: ${sourceText.trim().length} characters`,
-      `Critic reasoning: ${criticReasoning}`,
-    ],
-    agentPrompt: [
-      'Improve AgoraBabel market acceptance or explain why this input should remain rejected.',
-      `Rejection reason: ${message}`,
-      `Critic reasoning: ${criticReasoning}`,
-      'Inspect src/server/analyze.ts local heuristics and src/app/pipeline/analysisSchema.ts validation rules.',
-      'Only loosen acceptance if the source supports an objective, public, time-bounded YES/NO market.',
-    ].join('\n'),
-  };
-}
-
-function createRunFromAnalysis(run: PipelineRun, analysis: AnalysisResult): PipelineRun {
-  const ingestion = createSourceAnalysis(analysis);
-  const context = createContextAnalysis(analysis);
-  const acceptedMarket: AcceptedMarket | undefined = analysis.acceptedMarket
-    ? { ...analysis.acceptedMarket, criticReasoning: analysis.criticVerdict.reasoning }
-    : undefined;
-
-  return updateRun(run, {
-    extractedSource: analysis.extractedSource ?? undefined,
-    ingestion,
-    context,
-    candidateMarkets: analysis.candidateMarkets,
-    criticReviews: createCriticReviews(analysis),
-    rejectedMarkets: analysis.rejectedMarkets,
-    acceptedMarket,
-    steps: createPipelineSteps(analysis, ingestion, context, Boolean(acceptedMarket)),
-  });
-}
-
-function createCriticReviews(analysis: AnalysisResult): CriticVerdict[] {
-  return analysis.candidateMarkets.map((candidate) => {
-    if (analysis.criticVerdict.draftId === candidate.id) {
-      return {
-        ...analysis.criticVerdict,
-        draftId: candidate.id,
-      };
-    }
-
-    return {
-      draftId: candidate.id,
-      decision: 'rejected',
-      checks: {
-        ambiguity: 'fail',
-        resolvability: candidate.resolutionSource.toLowerCase().includes('official') ? 'pass' : 'fail',
-        deadline: candidate.deadline ? 'pass' : 'fail',
-        evidence: 'fail',
-        resolutionSource: candidate.resolutionSource.toLowerCase().includes('official') ? 'pass' : 'fail',
-      },
-      reasoning: analysis.rejectedMarkets.find((item) => item.draftId === candidate.id)?.reasonRejected
-        ?? candidate.evidenceSummary
-        ?? 'Rejected because the candidate did not pass the critic guardrails.',
-      violatedRule: analysis.rejectedMarkets.find((item) => item.draftId === candidate.id)?.violatedRule ?? 'ambiguity',
-    };
-  });
-}
-
-function createSourceAnalysis(analysis: AnalysisResult): SourceAnalysis {
-  return {
-    signalName: analysis.acceptedMarket?.question ?? analysis.eventSummary,
-    language: normalizeLanguageLabel(analysis.detectedLanguage),
-    languageConfidence: 100,
-    source: analysis.sourceType.replace(/_/g, ' '),
-    sourceUrl: analysis.extractedSource?.url,
-    sourceDate: new Date().toISOString().slice(0, 10),
-    entities: analysis.entities,
-    region: analysis.region,
-    topic: analysis.eventSummary,
-  };
-}
-
-function normalizeLanguageLabel(value: string) {
-  const lower = value.trim().toLowerCase();
-  const aliases: Record<string, string> = {
-    ar: 'Arabic',
-    de: 'German',
-    en: 'English',
-    es: 'Spanish',
-    fr: 'French',
-    hi: 'Hindi',
-    id: 'Indonesian',
-    it: 'Italian',
-    ja: 'Japanese',
-    ko: 'Korean',
-    pt: 'Portuguese',
-    ru: 'Russian',
-    tr: 'Turkish',
-    zh: 'Chinese',
-  };
-
-  if (aliases[lower]) return aliases[lower];
-  if (/^[a-z]{2,3}(-[a-z]{2,4})?$/i.test(value.trim())) {
-    try {
-      return new Intl.DisplayNames(['en'], { type: 'language' }).of(lower) ?? value.toUpperCase();
-    } catch {
-      return value.toUpperCase();
-    }
-  }
-
-  return value;
-}
-
-function createContextAnalysis(analysis: AnalysisResult): ContextAnalysis {
-  return {
-    englishSummary: analysis.eventSummary,
-    marketRelevance: analysis.marketRelevance.level,
-    relevanceExplanation: analysis.marketRelevance.explanation,
-    evidenceSummary: analysis.acceptedMarket?.evidenceSummary ?? analysis.rejectionReason ?? analysis.criticVerdict.reasoning,
-  };
-}
-
-function createPipelineSteps(
-  analysis: AnalysisResult,
-  ingestion: SourceAnalysis,
-  context: ContextAnalysis,
-  accepted: boolean,
-): PipelineStep[] {
-  const criticStatus: PipelineStepStatus = accepted ? 'complete' : 'failed';
-
-  return [
-    createStep('extraction', 'Source Extraction', 'Source Extraction', analysis.extractedSource ? 'Extract readable article text with the URL reader.' : 'Prepare pasted source text for analysis.', analysis.extractedSource ? `${analysis.extractedSource.title} from ${analysis.extractedSource.domain}.` : 'Raw pasted text accepted for analysis.', analysis.extractedSource ? `Extracted readable article text from ${analysis.extractedSource.domain}.` : 'Prepared pasted source text.', 'complete'),
-    createStep('ingestion', 'Source Metadata', 'Source Metadata', analysis.extractedSource ? 'Extract readable article text, then parse language, entities, and region.' : 'Parse language, source type, entities, and region.', `${ingestion.language} input with ${ingestion.entities.length} extracted entities.`, `${analysis.extractedSource ? `${analysis.extractedSource.title} / ${analysis.extractedSource.domain}` : ingestion.source}; region ${ingestion.region}.`, 'complete'),
-    createStep('context', 'Translation & Context', 'Translation & Context', 'Identify whether the source describes a deadlineable public event.', context.relevanceExplanation, context.englishSummary, 'complete'),
-    createStep('market-creator', 'Market Drafting', 'Market Drafting', 'Draft objective, binary market candidates only when the source supports them.', `${analysis.candidateMarkets.length} candidate market${analysis.candidateMarkets.length === 1 ? '' : 's'} returned by the validated schema.`, analysis.candidateMarkets[0]?.question ?? 'No market candidate survived source validation.', 'complete'),
-    createStep('critic', 'Validation Review', 'Validation Review', 'Reject weak candidates and approve only clear, public-resolution markets.', analysis.criticVerdict.reasoning, accepted ? 'One market accepted.' : analysis.rejectionReason ?? 'No accepted market.', criticStatus),
-    createStep('settlement', 'Trace Commit', 'Audit Trace', 'Package the accepted market with a local trace hash.', 'Prepared for Arc testnet commit.', accepted ? 'Trace hash generated from structured analysis outputs.' : 'Skipped because no market was accepted.', accepted ? 'complete' : 'pending'),
-  ];
-}
-
-function createExtractionStep(sourceText: string): PipelineStep {
-  const isUrl = looksLikeUrl(sourceText);
-
-  return createStep(
-    'extraction',
-    'Source Extraction',
-    'Source Extraction',
-    isUrl ? 'Extract readable article text from the submitted URL.' : 'Prepare pasted source text for analysis.',
-    isUrl ? 'Extracting article...' : 'Using the pasted source directly.',
-    isUrl ? 'Article extraction pending.' : 'Pasted source prepared.',
-    'pending',
-  );
+function labelForStep(stepId: PipelineStep['id']) {
+  return stageOrder.find((step) => step.id === stepId)?.agentName ?? 'Pipeline';
 }
 
 function createStep(
@@ -394,17 +377,9 @@ function createStep(
   action: string,
   reasoningSnippet: string,
   outputSummary: string,
-  status: PipelineStepStatus,
+  stage: PipelineStage,
 ): PipelineStep {
-  return {
-    id,
-    title,
-    agentName,
-    action,
-    reasoningSnippet,
-    outputSummary,
-    status,
-  };
+  return { id, title, agentName, action, reasoningSnippet, outputSummary, status: 'pending', stage };
 }
 
 function hydrateStep(run: PipelineRun, sourceStep: PipelineStep): PipelineRun {
@@ -414,42 +389,16 @@ function hydrateStep(run: PipelineRun, sourceStep: PipelineStep): PipelineRun {
 }
 
 function revealStepArtifacts(run: PipelineRun, resolvedRun: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
-  if (stepId === 'extraction') {
-    return updateRun(run, { extractedSource: resolvedRun.extractedSource });
-  }
-
-  if (stepId === 'ingestion') {
-    return updateRun(run, { ingestion: resolvedRun.ingestion });
-  }
-
-  if (stepId === 'context') {
-    return updateRun(run, { context: resolvedRun.context });
-  }
-
-  if (stepId === 'market-creator') {
-    return updateRun(run, { candidateMarkets: resolvedRun.candidateMarkets });
-  }
-
-  if (stepId === 'critic') {
-    return updateRun(run, {
-      criticReviews: resolvedRun.criticReviews,
-      acceptedMarket: resolvedRun.acceptedMarket,
-    });
-  }
-
+  if (stepId === 'extraction') return updateRun(run, { extractedSource: resolvedRun.extractedSource });
+  if (stepId === 'claim') return updateRun(run, { ingestion: resolvedRun.ingestion, context: resolvedRun.context });
+  if (stepId === 'resolver') return updateRun(run, { analysis: resolvedRun.analysis });
+  if (stepId === 'comparison') return updateRun(run, { analysis: resolvedRun.analysis });
+  if (stepId === 'market-creator') return updateRun(run, { candidateMarkets: resolvedRun.candidateMarkets, rejectedMarkets: resolvedRun.rejectedMarkets });
+  if (stepId === 'critic') return updateRun(run, { criticReviews: resolvedRun.criticReviews, acceptedMarket: resolvedRun.acceptedMarket });
+  if (stepId === 'circle') return updateRun(run, { circleAgentWallet: resolvedRun.circleAgentWallet });
+  if (stepId === 'settlement') return updateRun(run, { trace: resolvedRun.trace });
+  if (stepId === 'x402') return updateRun(run, { x402: resolvedRun.x402 });
   return run;
-}
-
-async function createLocalTrace(analysis: AnalysisResult): Promise<ArcTrace> {
-  const traceHash = await sha256Hex(canonicalJson(analysis));
-
-  return {
-    traceHash: `sha256:${traceHash}`,
-    transactionId: 'Prepared for Arc testnet commit',
-    network: 'Local trace hash',
-    status: 'pending',
-    timestamp: new Date().toISOString(),
-  };
 }
 
 function updateStep(run: PipelineRun, stepId: PipelineStep['id'], status: PipelineStepStatus): PipelineRun {
@@ -512,22 +461,25 @@ function looksLikeUrl(value: string): boolean {
   }
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
-  }
-
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(',')}}`;
-  }
-
-  return JSON.stringify(value);
+export function emitProductEvent(eventName: string, payload: Partial<{ artifactId: string; runId: string; stage: string; sourceType: 'text' | 'url' }> = {}) {
+  const sessionId = getSessionId();
+  void fetch('/api/events', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      eventName,
+      ...payload,
+      timestamp: new Date().toISOString(),
+      sessionId,
+    }),
+  }).catch(() => undefined);
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const encoded = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest('SHA-256', encoded);
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
+function getSessionId() {
+  const key = 'agorababel:sessionId';
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+  const created = `session-${crypto.randomUUID()}`;
+  window.localStorage.setItem(key, created);
+  return created;
 }

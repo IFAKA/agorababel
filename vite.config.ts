@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { handleAnalyzeRequest, handleRuntimeStatusRequest } from './src/server/analyze'
+import { handleAnalyzeRequest, handleEventsRequest, handleMarketIntelligenceRequest, handleRuntimeStatusRequest } from './src/server/analyze'
 
 
 function figmaAssetResolver() {
@@ -26,6 +26,12 @@ function analyzeApi() {
       })
       server.middlewares.use('/api/analyze', (request, response) => {
         void handleAnalyzeRequest(request, response)
+      })
+      server.middlewares.use('/api/events', (request, response) => {
+        void handleEventsRequest(request, response)
+      })
+      server.middlewares.use('/api/markets', (request, response) => {
+        void handleMarketIntelligenceRequest(request, response)
       })
     },
   }

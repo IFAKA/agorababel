@@ -1,8 +1,9 @@
 export const sampleArticle = {
   id: 'turkey-emergency-rate-intervention-2026',
   title: 'Turkey emergency central-bank intervention',
+  sourceDate: 'Not provided',
   sourceText:
-    'Dunya reports that Turkiye Cumhuriyet Merkez Bankasi officials are preparing an emergency liquidity and policy-rate intervention before 2026-06-15 after renewed pressure on the lira. Merkez Bankasi kaynaklari, karar metninin haftalik PPK toplantisi disinda yayimlanabilecegini ve duyurunun resmi TCMB sayfasindan yapilacagini belirtti.',
+    'Dunya reports that Turkiye Cumhuriyet Merkez Bankasi officials are preparing an emergency liquidity and policy-rate intervention before 2026-06-15 after renewed pressure on the lira. Merkez Bankasi kaynaklari, karar metninin haftalik PPK toplantisi disinda yayimlanabilecegini ve duyurunun resmi TCMB sayfasindan yapilacagini belirtti. The official resolver page named in the report is the TCMB website at https://www.tcmb.gov.tr/.',
 } as const;
 
 export const sampleArticles = [

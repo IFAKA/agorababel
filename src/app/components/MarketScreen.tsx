@@ -1,5 +1,6 @@
-import { ArrowRight, Check, Clipboard, Download } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { ArrowRight, Check, Clipboard, Download, ExternalLink, Share2 } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { emitProductEvent } from '../pipeline/apiProvider';
 import type { PipelineRun } from '../pipeline/types';
 import { pageContainerClassName } from './pageLayout';
 
@@ -9,9 +10,15 @@ export function MarketScreen({
   pipelineRun: PipelineRun;
 }) {
   const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [unlockStatus, setUnlockStatus] = useState<'idle' | 'required' | 'failed' | 'disabled'>('idle');
   const market = pipelineRun.acceptedMarket;
   const ingestion = pipelineRun.ingestion;
   const context = pipelineRun.context;
+  const analysis = pipelineRun.analysis;
+  const trace = pipelineRun.trace;
+  const traceCommitted = isCommittedTrace(trace);
+  const tracePanelTitle = traceCommitted ? 'Arc Testnet Commit' : 'Local Trace Prepared';
   const operatorMemo = useMemo(
     () =>
       market && ingestion && context
@@ -26,21 +33,64 @@ export function MarketScreen({
             deadline: market.deadline,
             resolutionSource: market.resolutionSource,
             criticVerdict: market.criticReasoning,
-            traceSummary: pipelineRun.trace
-              ? `Local audit trace prepared for Arc testnet commit: ${pipelineRun.trace.traceHash}.`
-              : 'Local audit trace prepared for Arc testnet commit after trace generation.',
+            traceSummary: describeTraceForMemo(trace),
           })
         : '',
-    [context, ingestion, market, pipelineRun.trace],
+    [context, ingestion, market, trace],
   );
 
   const handleCopyMemo = async () => {
     if (!operatorMemo) return;
 
     await navigator.clipboard.writeText(operatorMemo);
+    emitProductEvent('artifact_copied', { artifactId: market?.id, runId: pipelineRun.id });
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   };
+
+  const handleShare = async () => {
+    const url = window.location.href;
+    if (navigator.share) {
+      await navigator.share({ title: market?.question ?? 'AgoraBabel market artifact', url });
+    } else {
+      await navigator.clipboard.writeText(url);
+    }
+    emitProductEvent('artifact_shared', { artifactId: market?.id, runId: pipelineRun.id });
+  };
+
+  const handleFeedback = (value: string) => {
+    setFeedback(value);
+    emitProductEvent('feedback_submitted', { artifactId: market?.id, runId: pipelineRun.id, stage: value });
+  };
+
+  const handleUnlock = async () => {
+    if (!pipelineRun.x402 || !pipelineRun.x402.intelligenceUrl) return;
+    if (pipelineRun.x402.status === 'disabled') {
+      setUnlockStatus('disabled');
+      emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: 'disabled' });
+      return;
+    }
+
+    emitProductEvent('x402_unlock_started', { artifactId: market?.id, runId: pipelineRun.id });
+    const response = await fetch(pipelineRun.x402.intelligenceUrl);
+    if (response.status === 402) {
+      setUnlockStatus('required');
+      emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: 'payment-required' });
+      return;
+    }
+
+    if (!response.ok) {
+      setUnlockStatus('failed');
+      emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: String(response.status) });
+      return;
+    }
+
+    emitProductEvent('x402_unlock_completed', { artifactId: market?.id, runId: pipelineRun.id });
+  };
+
+  useEffect(() => {
+    if (market) emitProductEvent('artifact_opened', { artifactId: market.id, runId: pipelineRun.id });
+  }, [market, pipelineRun.id]);
 
   const handleDownloadMemo = () => {
     if (!operatorMemo) return;
@@ -82,6 +132,12 @@ export function MarketScreen({
                   <span className="inline-flex items-center justify-center gap-2">
                     <Download aria-hidden="true" size={15} />
                     Markdown
+                  </span>
+                </button>
+                <button type="button" onClick={handleShare} className="secondary-button pressable px-4">
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Share2 aria-hidden="true" size={15} />
+                    Share
                   </span>
                 </button>
               </div>
@@ -137,15 +193,60 @@ export function MarketScreen({
                   <ReportField label="Deadline" value={market.deadline} />
                   <ReportField label="Resolution source" value={market.resolutionSource} />
                   <ReportField label="Resolution criteria" value={market.criticReasoning} />
-                  <ReportField label="Audit trace status" value="Prepared for Arc testnet commit from resolution criteria and rejected-candidate review." />
                   <ReportField
-                    label="Audit Trace"
+                    label="Arc artifact hash"
                     value={
-                      pipelineRun.trace
-                        ? pipelineRun.trace.traceHash
-                        : 'Trace hash generated from structured analysis outputs.'
+                      traceCommitted
+                        ? trace?.artifactHash ?? trace?.traceHash ?? 'Committed hash unavailable.'
+                        : trace?.traceHash ?? 'No committed Arc trace.'
                     }
                   />
+                </section>
+
+                {analysis && (
+                  <section className="grid gap-4 border-t border-[#E5E1D8] pt-4 lg:grid-cols-3">
+                    <ProofPanel title="Official Resolver">
+                      <p className="text-sm font-semibold text-[#292824]">{analysis.resolver.name}</p>
+                      <a href={analysis.resolver.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 break-all text-sm font-medium text-[#305F72]">
+                        {analysis.resolver.url}
+                        <ExternalLink aria-hidden="true" size={13} />
+                      </a>
+                      <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.resolver.verificationEvidence}</p>
+                    </ProofPanel>
+                    <ProofPanel title="Market Comparison">
+                      <p className="text-sm font-semibold text-[#292824]">{analysis.marketComparison.noveltyVerdict}</p>
+                      <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.marketComparison.reasoning}</p>
+                      <p className="mt-2 text-xs font-medium text-[#77746B]">{analysis.marketComparison.similarMarkets.length} similar markets listed</p>
+                    </ProofPanel>
+                    <ProofPanel title="Circle Wallet">
+                      <p className="text-sm font-semibold text-[#292824]">{analysis.circleAgentWallet.status} / {analysis.circleAgentWallet.blockchain}</p>
+                      <p className="mt-2 break-all text-sm leading-6 text-[#625F57]">{analysis.circleAgentWallet.address ?? 'No wallet address'}</p>
+                      <p className="mt-1 text-xs font-medium text-[#77746B]">Wallet ID: {analysis.circleAgentWallet.walletId ?? 'missing'}</p>
+                    </ProofPanel>
+                  </section>
+                )}
+
+                <section className="grid gap-4 border-t border-[#E5E1D8] pt-4 md:grid-cols-2">
+                  <ProofPanel title={tracePanelTitle}>
+                    <p className="text-sm font-semibold text-[#292824]">{trace?.network ?? 'No committed trace'}</p>
+                    <p className="mt-2 break-all text-sm leading-6 text-[#625F57]">
+                      {traceCommitted
+                        ? trace?.transactionId ?? 'Transaction hash unavailable'
+                        : trace?.transactionId ?? 'Local trace prepared; no Arc transaction submitted'}
+                    </p>
+                    {!traceCommitted && (
+                      <p className="mt-2 text-sm leading-6 text-[#625F57]">
+                        Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
+                      </p>
+                    )}
+                    {traceCommitted && trace?.explorerUrl && (
+                      <a href={trace.explorerUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-[#305F72]">
+                        Arcscan
+                        <ExternalLink aria-hidden="true" size={13} />
+                      </a>
+                    )}
+                  </ProofPanel>
+                  <X402Panel x402={pipelineRun.x402} unlockStatus={unlockStatus} onUnlock={handleUnlock} />
                 </section>
 
                 <section className="border-t border-[#E5E1D8] pt-4">
@@ -162,11 +263,71 @@ export function MarketScreen({
                     ))}
                   </div>
                 </section>
+
+                <section className="border-t border-[#E5E1D8] pt-4">
+                  <div className="eyebrow">Feedback</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {['Would trade', 'Would not trade', 'Needs clearer resolver'].map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => handleFeedback(item)}
+                        className={`secondary-button pressable px-4 ${feedback === item ? 'border-[#171717] bg-[#171717] text-white' : ''}`}
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                </section>
               </div>
             </article>
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+function X402Panel({
+  x402,
+  unlockStatus,
+  onUnlock,
+}: {
+  x402: PipelineRun['x402'];
+  unlockStatus: 'idle' | 'required' | 'failed' | 'disabled';
+  onUnlock: () => void;
+}) {
+  if (!x402 || x402.status === 'disabled') {
+    return (
+      <ProofPanel title="x402 Intelligence API">
+        <p className="text-sm font-semibold text-[#292824]">Disabled for this run</p>
+        <p className="mt-2 text-sm leading-6 text-[#625F57]">
+          x402 is optional in this submission path and is not required unless X402_ENABLED=true.
+        </p>
+      </ProofPanel>
+    );
+  }
+
+  return (
+    <ProofPanel title="x402 Intelligence API">
+      <p className="text-sm font-semibold text-[#292824]">Status: {x402.status}</p>
+      <p className="mt-2 break-all text-sm leading-6 text-[#625F57]">{x402.intelligenceUrl}</p>
+      {x402.priceUsdcMicro && (
+        <p className="mt-1 text-sm text-[#625F57]">Price: {x402.priceUsdcMicro} micro-USDC on ARC-TESTNET</p>
+      )}
+      <button type="button" onClick={onUnlock} className="secondary-button pressable mt-3 px-4">
+        Test unlock
+      </button>
+      {unlockStatus !== 'idle' && <p className="mt-2 text-sm font-medium text-[#8C3D32]">Unlock result: {unlockStatus}</p>}
+    </ProofPanel>
+  );
+}
+
+function ProofPanel({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3">
+      <div className="eyebrow">{title}</div>
+      <div className="mt-3">{children}</div>
     </div>
   );
 }
@@ -271,9 +432,25 @@ function createOperatorMemo({
     criticVerdict,
     '',
     '## Audit Trace',
-    'Local reasoning trace hash prepared for Arc testnet commit.',
+    'Audit status for the artifact.',
     traceSummary,
   ].join('\n');
+}
+
+function isCommittedTrace(trace: PipelineRun['trace']) {
+  return trace?.status === 'committed' && Boolean(trace.transactionId?.startsWith('0x')) && Boolean(trace.explorerUrl);
+}
+
+function describeTraceForMemo(trace: PipelineRun['trace']) {
+  if (!trace) {
+    return 'No Arc transaction is attached to this artifact.';
+  }
+
+  if (isCommittedTrace(trace)) {
+    return `Arc Testnet transaction ${trace.transactionId}; artifact hash ${trace.artifactHash ?? trace.traceHash}.`;
+  }
+
+  return `Local trace prepared from structured outputs; no Arc transaction or x402 proof is attached. Trace hash ${trace.traceHash}.`;
 }
 
 function formatRejectedReason(rule: string) {

@@ -1,26 +1,53 @@
 import { z } from 'zod';
-import { getAcceptedMarketGuardrailFailure } from './guardrails';
 
 const nonEmptyText = z.string().trim().min(1);
-const RejectedMarketRuleSchema = z.enum(['ambiguity', 'no deadline', 'subjective wording', 'weak resolution']);
+const sha256Hex = z.string().regex(/^[a-f0-9]{64}$/i);
+const hex32 = z.string().regex(/^0x[a-f0-9]{64}$/i);
+
+export const PipelineStageSchema = z.enum([
+  'runtime-config',
+  'source-extraction',
+  'claim-extraction',
+  'resolver-verification',
+  'market-comparison',
+  'market-drafting',
+  'critic-review',
+  'circle-wallet',
+  'arc-trace-commit',
+  'x402-publication',
+  'complete',
+]);
+
+export const EvidenceSnippetSchema = z.object({
+  text: nonEmptyText,
+  source: nonEmptyText,
+}).strict();
+
+export const SimilarMarketSchema = z.object({
+  title: nonEmptyText,
+  url: z.string().url(),
+  source: nonEmptyText,
+  similarity: z.enum(['low', 'medium', 'high']),
+}).strict();
 
 export const MarketQuestionSchema = z.object({
   id: nonEmptyText,
   question: nonEmptyText,
   yesCriteria: nonEmptyText,
   noCriteria: nonEmptyText,
-  deadline: nonEmptyText,
-  resolutionSource: nonEmptyText,
+  deadline: z.string().date(),
+  resolverName: nonEmptyText,
+  resolverUrl: z.string().url(),
   evidenceSummary: nonEmptyText,
-  confidenceScore: z.number().min(0).max(100),
 }).strict();
 
 export const CriticCheckSchema = z.object({
-  ambiguity: z.enum(['pass', 'fail']),
-  resolvability: z.enum(['pass', 'fail']),
+  binary: z.enum(['pass', 'fail']),
+  resolver: z.enum(['pass', 'fail']),
   deadline: z.enum(['pass', 'fail']),
   evidence: z.enum(['pass', 'fail']),
-  resolutionSource: z.enum(['pass', 'fail']),
+  novelty: z.enum(['pass', 'fail']),
+  placeholderFree: z.enum(['pass', 'fail']),
 }).strict();
 
 export const CriticVerdictSchema = z.object({
@@ -28,200 +55,218 @@ export const CriticVerdictSchema = z.object({
   decision: z.enum(['accepted', 'rejected']),
   checks: CriticCheckSchema,
   reasoning: nonEmptyText,
-  violatedRule: RejectedMarketRuleSchema.optional(),
+  failedRules: z.array(nonEmptyText),
 }).strict();
 
 export const RejectedMarketReviewSchema = z.object({
   draftId: nonEmptyText,
   question: nonEmptyText,
   reasonRejected: nonEmptyText,
-  violatedRule: RejectedMarketRuleSchema,
+  violatedRule: z.enum(['ambiguity', 'no deadline', 'subjective wording', 'weak resolution', 'duplicate', 'placeholder wording']),
+}).strict();
+
+export const ArcTraceSchema = z.object({
+  status: z.enum(['committed', 'failed']),
+  artifactHash: hex32,
+  sourceHash: hex32,
+  transactionHash: z.string().regex(/^0x[a-f0-9]{64}$/i),
+  chainId: z.literal(5042002),
+  network: z.literal('Arc Testnet'),
+  explorerUrl: z.string().url(),
+  committedAt: nonEmptyText,
+}).strict();
+
+export const CircleAgentWalletStatusSchema = z.object({
+  status: z.enum(['ready', 'unconfigured', 'failed']),
+  walletId: nonEmptyText.nullable(),
+  walletSetId: nonEmptyText.nullable(),
+  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/).nullable(),
+  blockchain: z.literal('ARC-TESTNET'),
+  checkedAt: nonEmptyText,
+  error: nonEmptyText.nullable(),
+}).strict();
+
+export const X402PublicationStatusSchema = z.object({
+  status: z.enum(['required', 'disabled', 'failed']),
+  artifactId: nonEmptyText,
+  priceUsdcMicro: z.number().int().positive().nullable(),
+  payToAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/).nullable(),
+  facilitatorUrl: z.string().url().nullable(),
+  intelligenceUrl: nonEmptyText,
 }).strict();
 
 export const AnalysisResultSchema = z.object({
-  detectedLanguage: nonEmptyText,
-  region: nonEmptyText,
-  sourceType: z.enum(['article', 'url_article', 'official_report', 'social_post', 'other']),
-  extractedSource: z.object({
+  runId: nonEmptyText,
+  status: z.enum(['accepted', 'rejected']),
+  stage: PipelineStageSchema,
+  source: z.object({
+    inputType: z.enum(['text', 'url']),
     title: nonEmptyText,
-    domain: nonEmptyText,
-    url: nonEmptyText,
-    text: nonEmptyText,
-  }).strict().nullable(),
-  entities: z.array(nonEmptyText).max(12),
-  eventSummary: nonEmptyText,
-  marketRelevance: z.object({
-    level: z.enum(['Low', 'Medium', 'High']),
-    explanation: nonEmptyText,
-    hasDeadlineableEvent: z.boolean(),
+    url: z.string().url().nullable(),
+    domain: nonEmptyText.nullable(),
+    language: nonEmptyText,
+    publishedAt: z.string().datetime().nullable(),
+    extractedTextHash: sha256Hex,
   }).strict(),
-  candidateMarkets: z.array(MarketQuestionSchema).max(3),
+  claim: z.object({
+    summary: nonEmptyText,
+    region: nonEmptyText,
+    actors: z.array(nonEmptyText).min(1).max(12),
+    eventType: nonEmptyText,
+    deadline: z.string().date(),
+    evidence: z.array(EvidenceSnippetSchema).min(1).max(8),
+  }).strict(),
+  resolver: z.object({
+    name: nonEmptyText,
+    url: z.string().url(),
+    verificationStatus: z.literal('verified'),
+    verificationEvidence: nonEmptyText,
+  }).strict(),
+  marketComparison: z.object({
+    status: z.literal('checked'),
+    similarMarkets: z.array(SimilarMarketSchema).max(8),
+    noveltyVerdict: z.enum(['new-opportunity', 'duplicate', 'too-close']),
+    reasoning: nonEmptyText,
+  }).strict(),
+  candidateMarkets: z.array(MarketQuestionSchema).min(1).max(1),
+  rejectedMarkets: z.array(RejectedMarketReviewSchema).min(2).max(4),
   criticVerdict: CriticVerdictSchema,
-  rejectedMarkets: z.array(RejectedMarketReviewSchema).max(3),
   acceptedMarket: MarketQuestionSchema.nullable(),
+  arcTrace: ArcTraceSchema.nullable(),
+  circleAgentWallet: CircleAgentWalletStatusSchema,
+  x402: X402PublicationStatusSchema.nullable(),
   rejectionReason: nonEmptyText.nullable(),
 }).strict().superRefine((value, context) => {
-  if (value.acceptedMarket && value.criticVerdict.decision !== 'accepted') {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['criticVerdict', 'decision'],
-      message: 'Accepted market requires an accepted critic verdict.',
-    });
-  }
-
-  if (value.acceptedMarket) {
-    if (value.rejectedMarkets.length < 2) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['rejectedMarkets'],
-        message: 'Accepted analyses require at least two rejected market candidates.',
-      });
+  if (value.status === 'accepted') {
+    if (!value.acceptedMarket) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['acceptedMarket'], message: 'Accepted result requires acceptedMarket.' });
     }
 
-    if (!value.candidateMarkets.some((candidate) => candidate.id === value.acceptedMarket?.id)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['acceptedMarket', 'id'],
-        message: 'Accepted market must match a candidate market id.',
-      });
+    if (value.criticVerdict.decision !== 'accepted') {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['criticVerdict', 'decision'], message: 'Accepted result requires accepted critic verdict.' });
     }
 
-    for (const rejectedMarket of value.rejectedMarkets) {
-      if (rejectedMarket.draftId === value.acceptedMarket.id) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['rejectedMarkets'],
-          message: 'Rejected market list cannot include the accepted draft.',
-        });
-      }
+    if (value.arcTrace?.status !== 'committed') {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['arcTrace'], message: 'Accepted result requires committed Arc trace.' });
     }
 
-    const failure = getAcceptedMarketGuardrailFailure(value.acceptedMarket, value.criticVerdict);
+    if (value.circleAgentWallet.status !== 'ready') {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['circleAgentWallet', 'status'], message: 'Accepted result requires ready Circle wallet.' });
+    }
 
-    if (failure) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['acceptedMarket'],
-        message: failure,
-      });
+    if (value.marketComparison.noveltyVerdict !== 'new-opportunity') {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['marketComparison', 'noveltyVerdict'], message: 'Accepted result requires a new-opportunity novelty verdict.' });
+    }
+
+    if (value.rejectionReason !== null) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['rejectionReason'], message: 'Accepted result cannot include a rejection reason.' });
     }
   }
 
-  if (!value.acceptedMarket && !value.rejectionReason) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['rejectionReason'],
-      message: 'Rejected inputs require a rejection reason.',
-    });
+  if (value.status === 'rejected') {
+    if (value.acceptedMarket !== null || value.arcTrace !== null) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['acceptedMarket'], message: 'Rejected result cannot include accepted market or Arc trace.' });
+    }
+
+    if (!value.rejectionReason) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['rejectionReason'], message: 'Rejected result requires rejectionReason.' });
+    }
+  }
+
+  const forbidden = /\b(official sources|named authority|public authority|otherwise|market reaction|named public authority)\b/i;
+  const acceptedText = value.acceptedMarket
+    ? [value.acceptedMarket.question, value.acceptedMarket.yesCriteria, value.acceptedMarket.noCriteria, value.acceptedMarket.resolverName].join(' ')
+    : '';
+
+  if (acceptedText && forbidden.test(acceptedText)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['acceptedMarket'], message: 'Accepted market contains placeholder wording.' });
   }
 });
 
+export type PipelineStage = z.infer<typeof PipelineStageSchema>;
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
+export type MarketQuestion = z.infer<typeof MarketQuestionSchema>;
+export type RejectedMarketReview = z.infer<typeof RejectedMarketReviewSchema>;
+export type CriticVerdict = z.infer<typeof CriticVerdictSchema>;
+export type CircleAgentWalletStatus = z.infer<typeof CircleAgentWalletStatusSchema>;
+export type X402PublicationStatus = z.infer<typeof X402PublicationStatusSchema>;
 
 export const analyzeRequestSchema = z.object({
-  sourceText: z.string().trim().min(1, 'Paste article text or an article URL.').max(20000),
+  sourceText: z.string().trim().min(1, 'Paste article text or an article URL.').max(40000),
 }).strict();
 
 export const analysisJsonSchema = {
   type: 'object',
   additionalProperties: false,
-  required: [
-    'detectedLanguage',
-    'region',
-    'sourceType',
-    'extractedSource',
-    'entities',
-    'eventSummary',
-    'marketRelevance',
-    'candidateMarkets',
-    'criticVerdict',
-    'rejectedMarkets',
-    'acceptedMarket',
-    'rejectionReason',
-  ],
+  required: ['source', 'claim', 'resolver', 'candidateMarkets', 'rejectedMarkets', 'criticVerdict', 'rejectionReason'],
   properties: {
-    detectedLanguage: { type: 'string' },
-    region: { type: 'string' },
-    sourceType: { type: 'string', enum: ['article', 'url_article', 'official_report', 'social_post', 'other'] },
-    extractedSource: {
-      anyOf: [
-        {
-          type: 'object',
-          additionalProperties: false,
-          required: ['title', 'domain', 'url', 'text'],
-          properties: {
-            title: { type: 'string' },
-            domain: { type: 'string' },
-            url: { type: 'string' },
-            text: { type: 'string' },
-          },
-        },
-        { type: 'null' },
-      ],
-    },
-    entities: { type: 'array', items: { type: 'string' } },
-    eventSummary: { type: 'string' },
-    marketRelevance: {
+    source: {
       type: 'object',
       additionalProperties: false,
-      required: ['level', 'explanation', 'hasDeadlineableEvent'],
+      required: ['language', 'publishedAt'],
       properties: {
-        level: { type: 'string', enum: ['Low', 'Medium', 'High'] },
-        explanation: { type: 'string' },
-        hasDeadlineableEvent: { type: 'boolean' },
+        language: { type: 'string' },
+        publishedAt: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      },
+    },
+    claim: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['summary', 'region', 'actors', 'eventType', 'deadline', 'evidence'],
+      properties: {
+        summary: { type: 'string' },
+        region: { type: 'string' },
+        actors: { type: 'array', minItems: 1, items: { type: 'string' } },
+        eventType: { type: 'string' },
+        deadline: { type: 'string' },
+        evidence: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['text', 'source'],
+            properties: {
+              text: { type: 'string' },
+              source: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    resolver: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name', 'url', 'verificationEvidence'],
+      properties: {
+        name: { type: 'string' },
+        url: { type: 'string' },
+        verificationEvidence: { type: 'string' },
       },
     },
     candidateMarkets: {
       type: 'array',
+      minItems: 1,
+      maxItems: 1,
       items: {
         type: 'object',
         additionalProperties: false,
-        required: [
-          'id',
-          'question',
-          'yesCriteria',
-          'noCriteria',
-          'deadline',
-          'resolutionSource',
-          'evidenceSummary',
-          'confidenceScore',
-        ],
+        required: ['id', 'question', 'yesCriteria', 'noCriteria', 'deadline', 'resolverName', 'resolverUrl', 'evidenceSummary'],
         properties: {
           id: { type: 'string' },
           question: { type: 'string' },
           yesCriteria: { type: 'string' },
           noCriteria: { type: 'string' },
           deadline: { type: 'string' },
-          resolutionSource: { type: 'string' },
+          resolverName: { type: 'string' },
+          resolverUrl: { type: 'string' },
           evidenceSummary: { type: 'string' },
-          confidenceScore: { type: 'number' },
         },
-      },
-    },
-    criticVerdict: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['draftId', 'decision', 'checks', 'reasoning'],
-      properties: {
-        draftId: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        decision: { type: 'string', enum: ['accepted', 'rejected'] },
-        checks: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['ambiguity', 'resolvability', 'deadline', 'evidence', 'resolutionSource'],
-          properties: {
-            ambiguity: { type: 'string', enum: ['pass', 'fail'] },
-            resolvability: { type: 'string', enum: ['pass', 'fail'] },
-            deadline: { type: 'string', enum: ['pass', 'fail'] },
-            evidence: { type: 'string', enum: ['pass', 'fail'] },
-            resolutionSource: { type: 'string', enum: ['pass', 'fail'] },
-          },
-        },
-        reasoning: { type: 'string' },
       },
     },
     rejectedMarkets: {
       type: 'array',
+      minItems: 2,
       items: {
         type: 'object',
         additionalProperties: false,
@@ -230,39 +275,34 @@ export const analysisJsonSchema = {
           draftId: { type: 'string' },
           question: { type: 'string' },
           reasonRejected: { type: 'string' },
-          violatedRule: { type: 'string', enum: ['ambiguity', 'no deadline', 'subjective wording', 'weak resolution'] },
+          violatedRule: { type: 'string', enum: ['ambiguity', 'no deadline', 'subjective wording', 'weak resolution', 'duplicate', 'placeholder wording'] },
         },
       },
     },
-    acceptedMarket: {
-      anyOf: [
-        {
+    criticVerdict: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['draftId', 'decision', 'checks', 'reasoning', 'failedRules'],
+      properties: {
+        draftId: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        decision: { type: 'string', enum: ['accepted', 'rejected'] },
+        checks: {
           type: 'object',
           additionalProperties: false,
-          required: [
-            'id',
-            'question',
-            'yesCriteria',
-            'noCriteria',
-            'deadline',
-            'resolutionSource',
-            'evidenceSummary',
-            'confidenceScore',
-          ],
+          required: ['binary', 'resolver', 'deadline', 'evidence', 'novelty', 'placeholderFree'],
           properties: {
-            id: { type: 'string' },
-            question: { type: 'string' },
-            yesCriteria: { type: 'string' },
-            noCriteria: { type: 'string' },
-            deadline: { type: 'string' },
-            resolutionSource: { type: 'string' },
-            evidenceSummary: { type: 'string' },
-            confidenceScore: { type: 'number' },
+            binary: { type: 'string', enum: ['pass', 'fail'] },
+            resolver: { type: 'string', enum: ['pass', 'fail'] },
+            deadline: { type: 'string', enum: ['pass', 'fail'] },
+            evidence: { type: 'string', enum: ['pass', 'fail'] },
+            novelty: { type: 'string', enum: ['pass', 'fail'] },
+            placeholderFree: { type: 'string', enum: ['pass', 'fail'] },
           },
         },
-        { type: 'null' },
-      ],
+        reasoning: { type: 'string' },
+        failedRules: { type: 'array', items: { type: 'string' } },
+      },
     },
     rejectionReason: { anyOf: [{ type: 'string' }, { type: 'null' }] },
   },
-} as const;
+};

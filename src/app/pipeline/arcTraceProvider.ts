@@ -15,7 +15,7 @@ export class ArcTraceProvider implements TraceProvider {
 
   protected mapCommitResponse(response: ExternalArcCommitResponse): TraceRecord {
     if (typeof response.hash !== 'string' || response.hash.trim().length === 0) {
-      throw new Error('Local trace hash missing.');
+      throw new Error('Arc trace hash missing.');
     }
 
     if (typeof response.timestamp !== 'string' || response.timestamp.trim().length === 0) {
@@ -24,8 +24,8 @@ export class ArcTraceProvider implements TraceProvider {
 
     return {
       traceHash: response.hash,
-      transactionId: 'Prepared for Arc testnet commit',
-      network: 'Local trace hash',
+      transactionId: typeof response.transactionId === 'string' ? response.transactionId : 'No Arc transaction returned',
+      network: 'Arc Testnet',
       status: response.status === 'failed' ? 'failed' : 'pending',
       timestamp: response.timestamp,
       explorerUrl: typeof response.explorerUrl === 'string' ? response.explorerUrl : undefined,

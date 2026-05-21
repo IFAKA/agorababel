@@ -7,6 +7,7 @@ export {
   createSubmission,
   generateMarket,
   runAgentPipeline,
+  SimulatedPipelineProvider,
   validateMarket,
 } from './simulatedProvider';
 export type {
