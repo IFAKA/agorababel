@@ -2,6 +2,19 @@ import { z } from 'zod';
 import { analysisJsonSchema } from '../app/pipeline/analysisSchema';
 import { getRuntimeConfig } from './config';
 
+const MAX_LLM_SOURCE_CHARS = 5000;
+const GROQ_ROOT_OBJECT_CORRECTION = [
+  'Schema repair: the previous generation used a JSON array as the response root.',
+  'Return one artifact object directly. Do not wrap it in an array, even if the source contains multiple claims.',
+  'Choose the single strongest deadline-bound claim and put alternative drafts only inside rejectedMarkets.',
+  'The first non-whitespace character must be { and the last non-whitespace character must be }.',
+].join(' ');
+
+const absoluteHttpUrl = z.string().trim().url().refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === 'http:' || protocol === 'https:';
+}, 'Invalid http(s) url');
+
 const LlmDraftSchema = z.object({
   source: z.object({
     language: z.string().trim().min(1),
@@ -20,7 +33,7 @@ const LlmDraftSchema = z.object({
   }).strict(),
   resolver: z.object({
     name: z.string().trim().min(1),
-    url: z.string().url(),
+    url: absoluteHttpUrl,
     verificationEvidence: z.string().trim().min(1),
   }).strict(),
   candidateMarkets: z.array(z.object({
@@ -30,7 +43,7 @@ const LlmDraftSchema = z.object({
     noCriteria: z.string().trim().min(1),
     deadline: z.string().trim().min(1),
     resolverName: z.string().trim().min(1),
-    resolverUrl: z.string().url(),
+    resolverUrl: absoluteHttpUrl,
     evidenceSummary: z.string().trim().min(1),
   }).strict()).min(1).max(1),
   rejectedMarkets: z.array(z.object({
@@ -58,65 +71,70 @@ const LlmDraftSchema = z.object({
 
 export type LlmDraft = z.infer<typeof LlmDraftSchema>;
 
-export async function analyzeWithConfiguredLlm(sourceText: string): Promise<LlmDraft> {
+export async function analyzeWithConfiguredLlm(
+  sourceText: string,
+  options: { onNote?: (message: string) => void } = {},
+): Promise<LlmDraft> {
   const config = getRuntimeConfig();
+  options.onNote?.('source text sent to configured LLM');
+  options.onNote?.('strict JSON draft generating');
   const content = config.provider === 'groq'
-    ? await callGroq(sourceText)
+    ? await callGroq(sourceText, options.onNote)
     : await callOpenAI(sourceText);
-  const parsedJson = JSON.parse(extractJsonObject(content));
+  options.onNote?.('draft received, validating schema');
+  const parsedJson = parseLlmJsonObject(content);
   const parsed = LlmDraftSchema.safeParse(parsedJson);
 
   if (!parsed.success) {
     throw new Error(`LLM malformed JSON: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`);
   }
 
+  options.onNote?.('claim extracted');
+  options.onNote?.('critic verdict validated');
   return parsed.data;
 }
 
-async function callGroq(sourceText: string) {
+async function callGroq(sourceText: string, onNote?: (message: string) => void) {
   if (!process.env.GROQ_API_KEY) {
     throw new Error('GROQ_API_KEY is required when ANALYSIS_PROVIDER=groq.');
   }
 
   const config = getRuntimeConfig();
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const response = await callGroqCompletion(sourceText, config.model);
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+
+    if (isGroqSchemaValidationFailure(detail)) {
+      onNote?.('Groq rejected generated JSON; retrying with explicit root-object instruction');
+      const retry = await callGroqCompletion(sourceText, config.model, GROQ_ROOT_OBJECT_CORRECTION);
+
+      if (retry.ok) {
+        return readGroqContent(retry);
+      }
+
+      const retryDetail = await retry.text().catch(() => '');
+      throw new Error(`Groq analysis failed with HTTP ${retry.status}: ${summarizeGroqDetail(retryDetail)}`);
+    }
+
+    throw new Error(`Groq analysis failed with HTTP ${response.status}: ${summarizeGroqDetail(detail)}`);
+  }
+
+  return readGroqContent(response);
+}
+
+async function callGroqCompletion(sourceText: string, model: string, correction?: string) {
+  return fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: config.model,
-      temperature: 0,
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'agorababel_pipeline_draft',
-          schema: analysisJsonSchema,
-        },
-      },
-      messages: [
-        { role: 'system', content: createSystemPrompt() },
-        {
-          role: 'user',
-          content: [
-            'Extract one strict market-intelligence artifact from the source.',
-            'Return one JSON object with exactly these top-level keys: source, claim, resolver, candidateMarkets, rejectedMarkets, criticVerdict, rejectionReason.',
-            'Do not return {rejected, reason}. If rejecting, still fill every required object/array and set criticVerdict.decision="rejected" plus a non-null rejectionReason.',
-            'If accepting, set criticVerdict.decision="accepted", failedRules=[], rejectionReason=null, candidateMarkets length 1, and rejectedMarkets length at least 2.',
-            '',
-            sourceText.slice(0, 30000),
-          ].join('\n'),
-        },
-      ],
-    }),
+    body: JSON.stringify(createGroqRequestBody(sourceText, model, correction)),
   });
+}
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`Groq analysis failed with HTTP ${response.status}: ${detail.slice(0, 300)}`);
-  }
-
+async function readGroqContent(response: Response) {
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   const content = payload.choices?.[0]?.message?.content;
   if (!content) throw new Error('Groq analysis returned no JSON content.');
@@ -139,7 +157,7 @@ async function callOpenAI(sourceText: string) {
       model: config.model,
       input: [
         { role: 'system', content: createSystemPrompt() },
-        { role: 'user', content: `Extract one strict market-intelligence artifact or reject.\n\n${sourceText.slice(0, 30000)}` },
+        { role: 'user', content: createUserPrompt(sourceText) },
       ],
       text: {
         format: {
@@ -163,13 +181,36 @@ async function callOpenAI(sourceText: string) {
   return content;
 }
 
+function createGroqRequestBody(sourceText: string, model: string, correction?: string) {
+  return {
+    model,
+    temperature: 0,
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'agorababel_pipeline_draft',
+        strict: true,
+        schema: analysisJsonSchema,
+      },
+    },
+    messages: [
+      { role: 'system', content: createSystemPrompt() },
+      ...(correction ? [{ role: 'system' as const, content: correction }] : []),
+      { role: 'user', content: createUserPrompt(sourceText, correction) },
+    ],
+  };
+}
+
 function createSystemPrompt() {
   return [
     'You are AgoraBabel, a no-fallback market-intelligence agent.',
     'Return only JSON matching the supplied schema fields. Do not use Markdown.',
+    'The response root must be one JSON object, never an array or a list of claim objects.',
     'Every response must include top-level keys source, claim, resolver, candidateMarkets, rejectedMarkets, criticVerdict, and rejectionReason.',
     'Never return a short refusal object such as rejected/reason.',
-    'Reject unless the source proves a concrete event claim, named actors, an explicit deadline derived from the source, and an exact official resolver URL.',
+    'Reject unless the source proves a concrete event claim, named actors, and an explicit deadline derived from the source. Resolver URLs are candidate hints that will be independently discovered and verified online.',
+    'resolver.url and candidateMarkets[0].resolverUrl must be the same absolute http or https URL. Prefer official URLs copied from the source; otherwise use the official homepage for the named resolver body, never a news article URL.',
+    'Never omit criticVerdict.draftId, criticVerdict.reasoning, or criticVerdict.failedRules.',
     'The accepted market, if any, must be binary YES/NO, source-specific, deadline-bounded, and resolvable by the named official body.',
     'Do not invent deadlines, resolvers, publication dates, URLs, confidence scores, or facts absent from the source.',
     'Never use placeholder wording: official sources, named authority, public authority, otherwise, market reaction.',
@@ -177,11 +218,42 @@ function createSystemPrompt() {
   ].join(' ');
 }
 
-function extractJsonObject(value: string) {
+function createUserPrompt(sourceText: string, correction?: string) {
+  return [
+    correction ? `Correction: ${correction}` : '',
+    'Extract one strict market-intelligence artifact from the source.',
+    'The response root must be a single JSON object, not an array. Begin with { and end with }.',
+    'Return one JSON object with exactly these top-level keys: source, claim, resolver, candidateMarkets, rejectedMarkets, criticVerdict, rejectionReason.',
+    'Do not return {rejected, reason}. If rejecting, still fill every required object/array and set criticVerdict.decision="rejected" plus a non-null rejectionReason.',
+    'criticVerdict must always include draftId, decision, checks, reasoning, and failedRules.',
+    'If accepting, set criticVerdict.draftId to candidateMarkets[0].id, criticVerdict.decision="accepted", criticVerdict.failedRules=[], rejectionReason=null, candidateMarkets length 1, and rejectedMarkets length at least 2.',
+    'If rejecting, set criticVerdict.draftId to candidateMarkets[0].id when one candidate exists or null otherwise, set criticVerdict.failedRules to the failed rule names, and write a concrete criticVerdict.reasoning.',
+    '',
+    sourceText.slice(0, MAX_LLM_SOURCE_CHARS),
+  ].filter(Boolean).join('\n');
+}
+
+export function parseLlmJsonObject(value: string) {
   const trimmed = value.trim();
-  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
-  const start = trimmed.indexOf('{');
-  const end = trimmed.lastIndexOf('}');
-  if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
-  throw new Error('LLM response did not contain a JSON object.');
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error('LLM response was not valid JSON.');
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('LLM response JSON root was not an object.');
+  }
+
+  return parsed;
+}
+
+function isGroqSchemaValidationFailure(detail: string) {
+  return /json_validate_failed|Generated JSON does not match the expected schema/i.test(detail);
+}
+
+function summarizeGroqDetail(detail: string) {
+  return detail.slice(0, 1200);
 }

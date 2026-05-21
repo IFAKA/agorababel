@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 const nonEmptyText = z.string().trim().min(1);
+const absoluteHttpUrl = z.string().trim().url().refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === 'http:' || protocol === 'https:';
+}, 'Invalid http(s) url');
 const sha256Hex = z.string().regex(/^[a-f0-9]{64}$/i);
 const hex32 = z.string().regex(/^0x[a-f0-9]{64}$/i);
 
@@ -8,6 +12,7 @@ export const PipelineStageSchema = z.enum([
   'runtime-config',
   'source-extraction',
   'claim-extraction',
+  'resolver-discovery',
   'resolver-verification',
   'market-comparison',
   'market-drafting',
@@ -25,7 +30,7 @@ export const EvidenceSnippetSchema = z.object({
 
 export const SimilarMarketSchema = z.object({
   title: nonEmptyText,
-  url: z.string().url(),
+  url: absoluteHttpUrl,
   source: nonEmptyText,
   similarity: z.enum(['low', 'medium', 'high']),
 }).strict();
@@ -37,7 +42,7 @@ export const MarketQuestionSchema = z.object({
   noCriteria: nonEmptyText,
   deadline: z.string().date(),
   resolverName: nonEmptyText,
-  resolverUrl: z.string().url(),
+  resolverUrl: absoluteHttpUrl,
   evidenceSummary: nonEmptyText,
 }).strict();
 
@@ -72,7 +77,7 @@ export const ArcTraceSchema = z.object({
   transactionHash: z.string().regex(/^0x[a-f0-9]{64}$/i),
   chainId: z.literal(5042002),
   network: z.literal('Arc Testnet'),
-  explorerUrl: z.string().url(),
+  explorerUrl: absoluteHttpUrl,
   committedAt: nonEmptyText,
 }).strict();
 
@@ -91,8 +96,11 @@ export const X402PublicationStatusSchema = z.object({
   artifactId: nonEmptyText,
   priceUsdcMicro: z.number().int().positive().nullable(),
   payToAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/).nullable(),
-  facilitatorUrl: z.string().url().nullable(),
+  facilitatorUrl: absoluteHttpUrl.nullable(),
+  gatewayUrl: absoluteHttpUrl.nullable(),
+  network: nonEmptyText.nullable(),
   intelligenceUrl: nonEmptyText,
+  demoUnlockUrl: nonEmptyText.nullable(),
 }).strict();
 
 export const AnalysisResultSchema = z.object({
@@ -102,7 +110,7 @@ export const AnalysisResultSchema = z.object({
   source: z.object({
     inputType: z.enum(['text', 'url']),
     title: nonEmptyText,
-    url: z.string().url().nullable(),
+    url: absoluteHttpUrl.nullable(),
     domain: nonEmptyText.nullable(),
     language: nonEmptyText,
     publishedAt: z.string().datetime().nullable(),
@@ -118,18 +126,18 @@ export const AnalysisResultSchema = z.object({
   }).strict(),
   resolver: z.object({
     name: nonEmptyText,
-    url: z.string().url(),
+    url: absoluteHttpUrl,
     verificationStatus: z.literal('verified'),
     verificationEvidence: nonEmptyText,
-  }).strict(),
+  }).strict().nullable(),
   marketComparison: z.object({
     status: z.literal('checked'),
     similarMarkets: z.array(SimilarMarketSchema).max(8),
     noveltyVerdict: z.enum(['new-opportunity', 'duplicate', 'too-close']),
     reasoning: nonEmptyText,
-  }).strict(),
-  candidateMarkets: z.array(MarketQuestionSchema).min(1).max(1),
-  rejectedMarkets: z.array(RejectedMarketReviewSchema).min(2).max(4),
+  }).strict().nullable(),
+  candidateMarkets: z.array(MarketQuestionSchema).max(1),
+  rejectedMarkets: z.array(RejectedMarketReviewSchema).max(4),
   criticVerdict: CriticVerdictSchema,
   acceptedMarket: MarketQuestionSchema.nullable(),
   arcTrace: ArcTraceSchema.nullable(),
@@ -140,6 +148,22 @@ export const AnalysisResultSchema = z.object({
   if (value.status === 'accepted') {
     if (!value.acceptedMarket) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['acceptedMarket'], message: 'Accepted result requires acceptedMarket.' });
+    }
+
+    if (!value.resolver) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['resolver'], message: 'Accepted result requires a verified resolver.' });
+    }
+
+    if (!value.marketComparison) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['marketComparison'], message: 'Accepted result requires market comparison.' });
+    }
+
+    if (value.candidateMarkets.length !== 1) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['candidateMarkets'], message: 'Accepted result requires exactly one candidate market.' });
+    }
+
+    if (value.rejectedMarkets.length < 2) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['rejectedMarkets'], message: 'Accepted result requires at least two rejected alternatives.' });
     }
 
     if (value.criticVerdict.decision !== 'accepted') {
@@ -154,7 +178,7 @@ export const AnalysisResultSchema = z.object({
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['circleAgentWallet', 'status'], message: 'Accepted result requires ready Circle wallet.' });
     }
 
-    if (value.marketComparison.noveltyVerdict !== 'new-opportunity') {
+    if (value.marketComparison?.noveltyVerdict !== 'new-opportunity') {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['marketComparison', 'noveltyVerdict'], message: 'Accepted result requires a new-opportunity novelty verdict.' });
     }
 
@@ -240,7 +264,7 @@ export const analysisJsonSchema = {
       required: ['name', 'url', 'verificationEvidence'],
       properties: {
         name: { type: 'string' },
-        url: { type: 'string' },
+        url: { type: 'string', pattern: '^https?://[^\\s]+$' },
         verificationEvidence: { type: 'string' },
       },
     },
@@ -259,7 +283,7 @@ export const analysisJsonSchema = {
           noCriteria: { type: 'string' },
           deadline: { type: 'string' },
           resolverName: { type: 'string' },
-          resolverUrl: { type: 'string' },
+          resolverUrl: { type: 'string', pattern: '^https?://[^\\s]+$' },
           evidenceSummary: { type: 'string' },
         },
       },

@@ -27,6 +27,8 @@ const screenTransition = {
   ease: [0.23, 1, 0.32, 1],
 } as const;
 
+const splashSeenSessionKey = 'agorababel:splashSeen';
+
 function getInitialScreen(): Screen {
   const path = window.location.pathname.replace(/\/$/, '') || '/';
 
@@ -34,6 +36,34 @@ function getInitialScreen(): Screen {
   if (path.startsWith('/markets/')) return 'market';
 
   return 'landing';
+}
+
+function shouldShowInitialSplash(initialScreen: Screen) {
+  if (initialScreen !== 'landing') {
+    return false;
+  }
+
+  try {
+    return window.sessionStorage.getItem(splashSeenSessionKey) !== 'true';
+  } catch {
+    return true;
+  }
+}
+
+function hasSeenInitialSplash() {
+  try {
+    return window.sessionStorage.getItem(splashSeenSessionKey) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function markInitialSplashSeen() {
+  try {
+    window.sessionStorage.setItem(splashSeenSessionKey, 'true');
+  } catch {
+    // Session storage can be unavailable in hardened browser contexts.
+  }
 }
 
 function getPathForScreen(screen: Screen) {
@@ -47,7 +77,7 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>(initialScreen);
   const [sourceText, setSourceText] = useState('');
   const [runId, setRunId] = useState(0);
-  const [showSplash, setShowSplash] = useState(initialScreen === 'landing');
+  const [showSplash, setShowSplash] = useState(() => shouldShowInitialSplash(initialScreen));
   const [splashSettling, setSplashSettling] = useState(false);
   const [pipelineRun, setPipelineRun] = useState<PipelineRun>(() =>
     initialScreen === 'market'
@@ -65,6 +95,12 @@ export default function App() {
   useEffect(() => {
     currentScreenRef.current = currentScreen;
   }, [currentScreen]);
+
+  useEffect(() => {
+    if (showSplash) {
+      markInitialSplashSeen();
+    }
+  }, [showSplash]);
 
   useEffect(() => {
     if (!showSplash) {
@@ -89,8 +125,13 @@ export default function App() {
     if (currentScreen !== 'landing') {
       setShowSplash(false);
       setSplashSettling(false);
+      return;
     }
-  }, [currentScreen]);
+
+    if (!showSplash && !hasSeenInitialSplash()) {
+      setShowSplash(true);
+    }
+  }, [currentScreen, showSplash]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -178,11 +219,8 @@ export default function App() {
     setSourceText(submission.sourceText);
     setPipelineRun(runAgentPipeline(submission));
     handleNavigate('create');
-
-    void resolveSampleProvider().then((provider) => {
-      setActivePipelineProvider(provider === 'api' ? apiPipelineProvider : demoPipelineProvider);
-      setRunId((currentRunId) => currentRunId + 1);
-    });
+    setActivePipelineProvider(demoPipelineProvider);
+    setRunId((currentRunId) => currentRunId + 1);
   };
 
   const handleNewAnalysis = () => {
@@ -204,10 +242,11 @@ export default function App() {
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
     const runSourceText = sourceText;
 
     async function runPipeline() {
-      const pipelineUpdates = activePipelineProvider.run({ sourceText: runSourceText });
+      const pipelineUpdates = activePipelineProvider.run({ sourceText: runSourceText, signal: abortController.signal });
 
       for await (const update of pipelineUpdates) {
         if (cancelled) {
@@ -222,6 +261,7 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
   }, [runId, activePipelineProvider]);
 
@@ -283,7 +323,7 @@ export default function App() {
                   {currentScreen === 'landing' && (
                     <LandingScreen
                       introActive={showSplash}
-                      onNavigate={handleNavigate}
+                      onAnalyzeSource={handleNewAnalysis}
                       onRunSampleArticle={handleRunSampleArticle}
                     />
                   )}
@@ -310,17 +350,6 @@ export default function App() {
       </LayoutGroup>
     </MotionConfig>
   );
-}
-
-async function resolveSampleProvider(): Promise<'api' | 'demo'> {
-  try {
-    const response = await fetch('/api/runtime-status');
-    const payload = await response.json().catch(() => null) as { status?: unknown } | null;
-
-    return payload?.status === 'ready' ? 'api' : 'demo';
-  } catch {
-    return 'demo';
-  }
 }
 
 function SplashScreen({ settling }: { settling: boolean }) {

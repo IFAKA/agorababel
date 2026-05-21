@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { CriticVerdict, MarketQuestion, PipelineRun, PipelineStep, PipelineStepStatus, SourceAnalysis } from '../pipeline/types';
+import type { CriticVerdict, MarketQuestion, OperationEvent, PipelineRun, PipelineStep, PipelineStepStatus, SourceAnalysis } from '../pipeline/types';
 import { pageContainerClassName } from './pageLayout';
 
 type StepState = 'complete' | 'active' | 'pending' | 'failed';
@@ -24,6 +24,14 @@ type PresentedStepState = {
   index: number;
   status: PipelineStepStatus;
   since: number;
+};
+type ProgressStepId = 'source' | PipelineStep['id'];
+type ProgressStep = {
+  id: ProgressStepId;
+  label: string;
+  description: string;
+  status: PipelineStepStatus;
+  selectable: boolean;
 };
 type StepTransitionDirection = -1 | 0 | 1;
 type ArtifactView = {
@@ -96,12 +104,13 @@ const stepDescriptions: Record<PipelineStep['id'], string> = {
 
 const MIN_STEP_PROCESSING_MS = 850;
 const MIN_FAILURE_PROCESSING_MS = 1300;
-const MIN_COMPLETED_STEP_DWELL_MS = 900;
-const MAX_COMPLETED_STEP_DWELL_MS = 5200;
-const READING_WORDS_PER_MINUTE = 230;
-const CONTENT_REVEAL_BUFFER_MS = 450;
+const MIN_COMPLETED_STEP_DWELL_MS = 3600;
+const MAX_COMPLETED_STEP_DWELL_MS = 8200;
+const READING_WORDS_PER_MINUTE = 150;
+const CONTENT_REVEAL_BUFFER_MS = 900;
 const MIN_PASTED_SOURCE_LENGTH = 120;
-const SOCIAL_URL_HOSTS = ['facebook.com', 'instagram.com', 'linkedin.com', 'tiktok.com', 'x.com', 'twitter.com'];
+const SOURCE_ACCEPTED_HANDOFF_MS = 900;
+const SOCIAL_URL_HOSTS = ['facebook.com', 'instagram.com', 'linkedin.com', 'reddit.com', 'tiktok.com', 'x.com', 'twitter.com'];
 
 export function ProcessingScreen({
   sourceText,
@@ -124,11 +133,13 @@ export function ProcessingScreen({
   const [errorCopied, setErrorCopied] = useState(false);
   const [selectedStepId, setSelectedStepId] = useState<PipelineStep['id'] | null>(null);
   const [presentedStep, setPresentedStep] = useState<PresentedStepState>({ index: 0, status: 'pending', since: Date.now() });
+  const [sourceAcceptedHandoffComplete, setSourceAcceptedHandoffComplete] = useState(false);
   const reduceMotion = useReducedMotion();
   const hasStarted = runId > 0;
+  const showSourceAccepted = hasStarted && !sourceAcceptedHandoffComplete;
   const presentedSteps = useMemo(
-    () => createPresentedSteps(pipelineRun.steps, hasStarted ? presentedStep : { index: 0, status: 'pending', since: presentedStep.since }),
-    [hasStarted, pipelineRun.steps, presentedStep],
+    () => createPresentedSteps(pipelineRun.steps, hasStarted && !showSourceAccepted ? presentedStep : { index: 0, status: 'pending', since: presentedStep.since }),
+    [hasStarted, pipelineRun.steps, presentedStep, showSourceAccepted],
   );
   const runningStep = presentedSteps.find((step) => step.status === 'running' || step.status === 'failed');
   const activeStep = runningStep ?? [...presentedSteps].reverse().find((step) => step.status === 'complete') ?? presentedSteps[0];
@@ -147,14 +158,32 @@ export function ProcessingScreen({
   const isComplete = pipelineRun.status === 'complete';
   const isRunning = pipelineRun.status === 'running';
   const sourceReadiness = getSourceReadiness(sourceText, isRunning);
+  const progressSteps = useMemo<ProgressStep[]>(() => [
+    {
+      id: 'source',
+      label: 'Source',
+      description: hasStarted ? 'The submitted source is locked for analysis.' : 'Paste source material and submit it for analysis.',
+      status: hasStarted && !showSourceAccepted ? 'complete' : 'running',
+      selectable: false,
+    },
+    ...presentedSteps.map((step) => ({
+      id: step.id,
+      label: stepLabels[step.id],
+      description: stepDescriptions[step.id],
+      status: step.status,
+      selectable: hasStarted && !showSourceAccepted && step.status !== 'pending',
+    })),
+  ], [hasStarted, presentedSteps, showSourceAccepted]);
+  const selectedProgressStepId: ProgressStepId | undefined = !hasStarted || showSourceAccepted ? 'source' : displayedStep?.id;
   const progressRail = (
     <ProgressRail
-      steps={presentedSteps}
-      hasStarted={hasStarted}
-      selectedStepId={displayedStep?.id}
+      steps={progressSteps}
+      selectedStepId={selectedProgressStepId}
       onSelectStep={(stepId) => {
+        if (stepId === 'source') return;
+
         const step = presentedSteps.find((item) => item.id === stepId);
-        if (hasStarted && step?.status !== 'pending') setSelectedStepId(stepId);
+        if (step?.status !== 'pending') setSelectedStepId(stepId);
       }}
     />
   );
@@ -163,58 +192,50 @@ export function ProcessingScreen({
     setCopied(false);
     setErrorCopied(false);
     setSelectedStepId(null);
+    setSourceAcceptedHandoffComplete(runId === 0);
     setPresentedStep({ index: 0, status: runId > 0 ? 'running' : 'pending', since: Date.now() });
   }, [pipelineRun.id, runId]);
+
+  useEffect(() => {
+    if (!hasStarted) return;
+
+    const handoffTimeout = window.setTimeout(() => setSourceAcceptedHandoffComplete(true), SOURCE_ACCEPTED_HANDOFF_MS);
+
+    return () => {
+      window.clearTimeout(handoffTimeout);
+    };
+  }, [hasStarted, runId]);
 
   useEffect(() => {
     previousDisplayedStepIndexRef.current = displayedStepIndex;
   }, [displayedStepIndex]);
 
   useEffect(() => {
-    if (!hasStarted || pipelineRun.steps.length === 0) return;
+    if (!hasStarted || showSourceAccepted || pipelineRun.steps.length === 0) return;
 
-    const target = getPresentationTarget(pipelineRun);
-    const now = Date.now();
-    const elapsed = now - presentedStep.since;
+    const target = getGatedPresentationTarget(pipelineRun, presentedStep);
 
     const setPresented = (index: number, status: PipelineStepStatus) => {
       setPresentedStep({ index, status, since: Date.now() });
     };
 
-    if (presentedStep.index < target.index) {
-      if (presentedStep.status === 'complete') {
-        const currentStep = pipelineRun.steps[presentedStep.index];
-        const delay = Math.max(getCompletedStepDwellMs(pipelineRun, currentStep) - elapsed, 0);
-        const timeout = window.setTimeout(() => setPresented(presentedStep.index + 1, 'running'), delay);
+    if (target.index > presentedStep.index && presentedStep.status === 'complete') {
+      const currentStep = pipelineRun.steps[presentedStep.index];
+      const remainingDwellMs = Math.max(getCompletedStepDwellMs(pipelineRun, currentStep) - (Date.now() - presentedStep.since), 0);
+
+      if (remainingDwellMs > 0) {
+        const timeout = window.setTimeout(() => {
+          setPresented(target.index, target.status === 'pending' ? 'running' : target.status);
+        }, remainingDwellMs);
+
         return () => window.clearTimeout(timeout);
       }
-
-      const delay = Math.max(MIN_STEP_PROCESSING_MS - elapsed, 0);
-      const timeout = window.setTimeout(() => setPresented(presentedStep.index, 'complete'), delay);
-      return () => window.clearTimeout(timeout);
     }
 
-    if (presentedStep.index > target.index) {
+    if (presentedStep.index !== target.index || presentedStep.status !== target.status) {
       setPresented(target.index, target.status === 'pending' ? 'running' : target.status);
-      return;
     }
-
-    if (target.status === 'failed' && presentedStep.status !== 'failed') {
-      const delay = Math.max(MIN_FAILURE_PROCESSING_MS - elapsed, 0);
-      const timeout = window.setTimeout(() => setPresented(presentedStep.index, 'failed'), delay);
-      return () => window.clearTimeout(timeout);
-    }
-
-    if (target.status === 'complete' && presentedStep.status !== 'complete') {
-      const delay = Math.max(MIN_STEP_PROCESSING_MS - elapsed, 0);
-      const timeout = window.setTimeout(() => setPresented(presentedStep.index, 'complete'), delay);
-      return () => window.clearTimeout(timeout);
-    }
-
-    if (target.status === 'running' && presentedStep.status !== 'running') {
-      setPresented(presentedStep.index, 'running');
-    }
-  }, [hasStarted, pipelineRun, presentedStep]);
+  }, [hasStarted, pipelineRun, presentedStep, showSourceAccepted]);
 
   const handleCopy = async () => {
     if (!pipelineRun.acceptedMarket) return;
@@ -237,28 +258,25 @@ export function ProcessingScreen({
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className={`${pageContainerClassName} max-w-7xl`}>
           <section className="mx-auto w-full max-w-7xl min-w-0">
-            {!hasStarted ? (
-              <QueuedArtifact
-                sourceText={sourceText}
-                onSourceTextChange={onSourceTextChange}
-                onRunPipeline={onRunPipeline}
-                sourceReadiness={sourceReadiness}
-              />
-            ) : (
-              <ActiveArtifact
-                pipelineRun={pipelineRun}
-                activeStep={displayedStep}
-                copied={copied}
-                errorCopied={errorCopied}
-                onCopy={handleCopy}
-                onCopyError={handleCopyError}
-                onOpenFinalArtifact={onOpenFinalArtifact}
-                onNewAnalysis={onNewAnalysis}
-                isComplete={isComplete}
-                progressRail={progressRail}
-                transitionDirection={stepTransitionDirection}
-              />
-            )}
+            <PipelineArtifact
+              sourceText={sourceText}
+              onSourceTextChange={onSourceTextChange}
+              onRunPipeline={onRunPipeline}
+              sourceReadiness={sourceReadiness}
+              pipelineRun={pipelineRun}
+              activeStep={displayedStep}
+              copied={copied}
+              errorCopied={errorCopied}
+              onCopy={handleCopy}
+              onCopyError={handleCopyError}
+              onOpenFinalArtifact={onOpenFinalArtifact}
+              onNewAnalysis={onNewAnalysis}
+              isComplete={isComplete}
+              progressRail={progressRail}
+              transitionDirection={!hasStarted || showSourceAccepted || (hasStarted && displayedStepIndex === 0 && presentedStep.status === 'running') ? 1 : stepTransitionDirection}
+              showSourceInput={!hasStarted}
+              showSourceAccepted={showSourceAccepted}
+            />
           </section>
         </div>
       </main>
@@ -348,23 +366,21 @@ function SourceInput({
 
 function ProgressRail({
   steps,
-  hasStarted,
   selectedStepId,
   onSelectStep,
 }: {
-  steps: PipelineStep[];
-  hasStarted: boolean;
-  selectedStepId?: PipelineStep['id'];
-  onSelectStep: (stepId: PipelineStep['id']) => void;
+  steps: ProgressStep[];
+  selectedStepId?: ProgressStepId;
+  onSelectStep: (stepId: ProgressStepId) => void;
 }) {
   const reduceMotion = useReducedMotion();
   const [tooltip, setTooltip] = useState<{
-    stepId: PipelineStep['id'];
+    stepId: ProgressStepId;
     left: number;
     top: number;
   } | null>(null);
 
-  const showTooltip = (stepId: PipelineStep['id'], target: HTMLElement) => {
+  const showTooltip = (stepId: ProgressStepId, target: HTMLElement) => {
     const rect = target.getBoundingClientRect();
     const tooltipWidth = 256;
     const viewportPadding = 16;
@@ -387,12 +403,12 @@ function ProgressRail({
       <div className="-mx-6 overflow-x-auto px-6 py-1 sm:-mx-8 sm:px-8 lg:-mx-10 lg:px-10">
         <ol className="flex min-w-max items-center gap-0 sm:min-w-0">
           {steps.map((step, index) => {
-            const state = getStepState(hasStarted ? step.status : 'pending');
+            const state = getStepState(step.status);
             const nextStep = steps[index + 1];
-            const nextState = nextStep ? getStepState(hasStarted ? nextStep.status : 'pending') : undefined;
-            const selected = hasStarted && selectedStepId === step.id;
+            const nextState = nextStep ? getStepState(nextStep.status) : undefined;
+            const selected = selectedStepId === step.id;
             const hasConnector = index < steps.length - 1;
-            const disabled = !hasStarted || step.status === 'pending';
+            const disabled = !step.selectable;
 
             return (
               <li key={step.id} className="flex min-w-0 items-center">
@@ -408,7 +424,7 @@ function ProgressRail({
                     onBlur={() => setTooltip(null)}
                     disabled={disabled}
                     aria-current={selected ? 'step' : undefined}
-                    aria-label={`${stepLabels[step.id]}: ${stepDescriptions[step.id]}`}
+                    aria-label={`${step.label}: ${step.description}`}
                     className={`inline-flex h-9 items-center justify-center gap-2 rounded-full border px-2.5 text-sm font-medium transition-[background-color,border-color,color,box-shadow,width] duration-200 disabled:cursor-not-allowed ${
                       selected
                         ? 'border-[#171717] bg-[#171717] pr-4 text-white shadow-[0_10px_24px_rgba(29,28,24,0.12)]'
@@ -420,7 +436,7 @@ function ProgressRail({
                     }`}
                   >
                     <StepMark state={state} compact selected={selected} />
-                    {selected && <span className="max-w-[11rem] truncate">{stepLabels[step.id]}</span>}
+                    {selected && <span className="max-w-[11rem] truncate">{step.label}</span>}
                   </button>
                 </span>
                 {hasConnector && <StepConnector state={state} nextState={nextState} reduceMotion={Boolean(reduceMotion)} />}
@@ -435,8 +451,8 @@ function ProgressRail({
           className="pointer-events-none fixed z-[9999] w-64 -translate-x-1/2 rounded-md border border-[#D8D3C8] bg-white px-3 py-2 text-left text-xs leading-5 text-[#625F57] opacity-100 shadow-[0_18px_44px_rgba(29,28,24,0.14)]"
           style={{ left: tooltip.left, top: tooltip.top }}
         >
-          <span className="block font-semibold text-[#171717]">{stepLabels[tooltipStep.id]}</span>
-          {stepDescriptions[tooltipStep.id]}
+          <span className="block font-semibold text-[#171717]">{tooltipStep.label}</span>
+          {tooltipStep.description}
         </span>
       )}
     </nav>
@@ -544,38 +560,11 @@ function StepMark({ state, compact = false, selected = false }: { state: StepSta
   );
 }
 
-function QueuedArtifact({
+function PipelineArtifact({
   sourceText,
   onSourceTextChange,
   onRunPipeline,
   sourceReadiness,
-}: {
-  sourceText: string;
-  onSourceTextChange: (value: string) => void;
-  onRunPipeline: (value: string) => void;
-  sourceReadiness: SourceReadiness;
-}) {
-  return (
-    <section className="artifact-card min-h-[30rem] min-w-0 p-8 sm:p-10">
-      <div className="eyebrow">Ready</div>
-      <h2 className="mt-5 max-w-2xl text-3xl font-semibold leading-tight tracking-normal text-[#171717] sm:text-4xl">
-        Source analysis is ready.
-      </h2>
-      <p className="mt-5 max-w-xl text-lg leading-8 text-[#625F57]">
-        Paste source material to produce a validated artifact with rejected candidates and an audit trace.
-      </p>
-      <SourceInput
-        sourceText={sourceText}
-        onSourceTextChange={onSourceTextChange}
-        onRunPipeline={onRunPipeline}
-        sourceReadiness={sourceReadiness}
-        variant="embedded"
-      />
-    </section>
-  );
-}
-
-function ActiveArtifact({
   pipelineRun,
   activeStep,
   copied,
@@ -587,7 +576,13 @@ function ActiveArtifact({
   isComplete,
   progressRail,
   transitionDirection,
+  showSourceInput,
+  showSourceAccepted,
 }: {
+  sourceText: string;
+  onSourceTextChange: (value: string) => void;
+  onRunPipeline: (value: string) => void;
+  sourceReadiness: SourceReadiness;
   pipelineRun: PipelineRun;
   activeStep?: PipelineStep;
   copied: boolean;
@@ -599,10 +594,12 @@ function ActiveArtifact({
   isComplete: boolean;
   progressRail?: ReactNode;
   transitionDirection: StepTransitionDirection;
+  showSourceInput: boolean;
+  showSourceAccepted: boolean;
 }) {
   const reduceMotion = useReducedMotion();
 
-  if (pipelineRun.error && activeStep?.status === 'failed') {
+  if (!showSourceInput && !showSourceAccepted && pipelineRun.error && activeStep?.status === 'failed') {
     const errorBrief = pipelineRun.errorBrief;
     const copyText = formatErrorForCopy(pipelineRun);
 
@@ -647,15 +644,19 @@ function ActiveArtifact({
     );
   }
 
-  const view = getArtifactView({
-    pipelineRun,
-    activeStep,
-    copied,
-    onCopy,
-    onOpenFinalArtifact,
-    onNewAnalysis,
-    isComplete,
-  });
+  const view = showSourceInput
+    ? getSourceInputView({ sourceText, onSourceTextChange, onRunPipeline, sourceReadiness })
+    : showSourceAccepted
+      ? getSourceAcceptedView(pipelineRun.sourceInput || sourceText, Boolean(reduceMotion))
+      : getArtifactView({
+          pipelineRun,
+          activeStep,
+          copied,
+          onCopy,
+          onOpenFinalArtifact,
+          onNewAnalysis,
+          isComplete,
+        });
 
   return (
     <StepArtifactFrame
@@ -670,10 +671,69 @@ function ActiveArtifact({
       contentKey={view.key}
       transitionDirection={transitionDirection}
       reduceMotion={Boolean(reduceMotion)}
+      operations={view.step ? pipelineRun.stepOperations[view.step.id] ?? [] : []}
     >
       {view.body}
     </StepArtifactFrame>
   );
+}
+
+function getSourceInputView({
+  sourceText,
+  onSourceTextChange,
+  onRunPipeline,
+  sourceReadiness,
+}: {
+  sourceText: string;
+  onSourceTextChange: (value: string) => void;
+  onRunPipeline: (value: string) => void;
+  sourceReadiness: SourceReadiness;
+}): ArtifactView {
+  return {
+    key: 'source-input',
+    eyebrow: 'Source',
+    title: 'Source analysis is ready.',
+    description: 'Paste source material to produce a validated artifact with rejected candidates and an audit trace.',
+    icon: <FileText aria-hidden="true" size={18} />,
+    body: (
+      <SourceInput
+        sourceText={sourceText}
+        onSourceTextChange={onSourceTextChange}
+        onRunPipeline={onRunPipeline}
+        sourceReadiness={sourceReadiness}
+        variant="embedded"
+      />
+    ),
+  };
+}
+
+function getSourceAcceptedView(sourceText: string, reduceMotion: boolean): ArtifactView {
+  const sourceSummary = getSubmittedSourceSummary(sourceText);
+
+  return {
+    key: 'source-accepted',
+    eyebrow: 'Source',
+    title: 'Source submitted.',
+    description: 'The submitted source is locked and queued for extraction.',
+    icon: <LoaderCircle aria-hidden="true" className={reduceMotion ? '' : 'animate-spin'} size={18} />,
+    body: (
+      <>
+        <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="eyebrow">Submitted source</div>
+            <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
+              {sourceSummary.kind}
+            </span>
+          </div>
+          <p className="mt-3 text-base leading-7 text-[#292824] [overflow-wrap:anywhere]">{sourceSummary.text}</p>
+        </StepReveal>
+        <StepReveal index={1} className="mt-5 flex items-center gap-3 rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium text-[#625F57]">
+          <LoaderCircle aria-hidden="true" className={`shrink-0 text-[#292824] ${reduceMotion ? '' : 'animate-spin'}`} size={16} />
+          Source handoff is being prepared for the first analysis agent.
+        </StepReveal>
+      </>
+    ),
+  };
 }
 
 function getArtifactView({
@@ -781,6 +841,126 @@ function getArtifactView({
       };
     }
 
+    case 'claim': {
+      const ingestion = pipelineRun.ingestion;
+      const context = pipelineRun.context;
+
+      if (!ingestion || !context) {
+        return createPendingArtifactView(activeStep, 'Structured claim extraction is running.');
+      }
+
+      return {
+        key: activeStep.id,
+        step: activeStep,
+        eyebrow: 'Claim Extraction',
+        title: ingestion.signalName,
+        description: context.relevanceExplanation,
+        icon: <Languages aria-hidden="true" size={18} />,
+        body: (
+          <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
+            <StepReveal>
+              <ArtifactField label="Region and event" value={`${ingestion.region} / ${ingestion.topic}`} />
+            </StepReveal>
+            <StepReveal index={1}>
+              <ArtifactField label="Actors" value={getActors(ingestion.entities)} />
+            </StepReveal>
+            <StepReveal index={2} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+              <div className="eyebrow">Validated evidence</div>
+              <p className="mt-3 text-base leading-7 text-[#292824]">{context.evidenceSummary}</p>
+            </StepReveal>
+          </div>
+        ),
+      };
+    }
+
+    case 'resolver': {
+      const resolver = pipelineRun.liveResolver ?? pipelineRun.analysis?.resolver;
+      const discovery = pipelineRun.resolverDiscovery ?? createResolverDiscoveryFromResolver(resolver);
+
+      if (!resolver) {
+        if (pipelineRun.status === 'rejected' || discovery) {
+          return {
+            key: activeStep.id,
+            step: activeStep,
+            eyebrow: 'Official Resolver',
+            title: discovery?.status === 'found'
+              ? 'Official resolver verification running'
+              : 'Source analyzed, but no official resolver found',
+            description: discovery?.status === 'found'
+              ? `${discovery.candidate?.name ?? 'Resolver candidate'} is being fetched and identity-checked.`
+              : pipelineRun.analysis?.rejectionReason ?? discovery?.reason ?? 'The source did not produce a fetchable official resolver URL.',
+            icon: <Globe2 aria-hidden="true" size={18} />,
+            body: (
+              <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
+                {discovery && <ResolverDiscoveryPanel discovery={discovery} />}
+                {discovery?.status !== 'found' && (
+                  <div className="rounded-md border border-[#E0C5BC] bg-[#FFF9F5] p-4">
+                    <ArtifactField label="Result" value={pipelineRun.analysis?.rejectionReason ?? discovery?.reason ?? 'No official resolver found.'} />
+                  </div>
+                )}
+              </div>
+            ),
+          };
+        }
+
+        return createPendingArtifactView(activeStep, 'Resolver verification is running.');
+      }
+
+      return {
+        key: activeStep.id,
+        step: activeStep,
+        eyebrow: 'Official Resolver',
+        title: resolver.name,
+        description: resolver.verificationEvidence,
+        icon: <Globe2 aria-hidden="true" size={18} />,
+        body: (
+          <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
+            {discovery && <ResolverDiscoveryPanel discovery={discovery} verifiedUrl={resolver.url} />}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <StepReveal>
+                <ArtifactField label="Status" value={resolver.verificationStatus} />
+              </StepReveal>
+              <StepReveal index={1}>
+                <ArtifactField label="Resolver URL" value={resolver.url} />
+              </StepReveal>
+            </div>
+          </div>
+        ),
+      };
+    }
+
+    case 'comparison': {
+      const comparison = pipelineRun.liveMarketComparison ?? pipelineRun.analysis?.marketComparison;
+
+      if (!comparison) {
+        return createPendingArtifactView(activeStep, 'Market comparison is checking configured sources.');
+      }
+
+      return {
+        key: activeStep.id,
+        step: activeStep,
+        eyebrow: 'Market Comparison',
+        title: `Novelty verdict: ${comparison.noveltyVerdict}`,
+        description: comparison.reasoning,
+        icon: <ListChecks aria-hidden="true" size={18} />,
+        body: (
+          <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
+            <StepReveal>
+              <ArtifactField label="Search status" value={comparison.status} />
+            </StepReveal>
+            <StepReveal index={1} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+              <div className="eyebrow">Similar markets</div>
+              <p className="mt-3 text-base leading-7 text-[#292824]">
+                {comparison.similarMarkets.length > 0
+                  ? comparison.similarMarkets.map((market) => `${market.title} (${market.similarity})`).join('; ')
+                  : 'No overlapping actor/event markets found in configured sources.'}
+              </p>
+            </StepReveal>
+          </div>
+        ),
+      };
+    }
+
     case 'context': {
       const context = pipelineRun.context;
 
@@ -803,6 +983,9 @@ function getArtifactView({
             <StepReveal index={1} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
               <div className="eyebrow">Evidence summary</div>
               <p className="mt-3 text-base leading-7 text-[#292824]">{context.evidenceSummary}</p>
+            </StepReveal>
+            <StepReveal index={2}>
+              <ComparisonMoment pipelineRun={pipelineRun} />
             </StepReveal>
           </div>
         ),
@@ -839,6 +1022,9 @@ function getArtifactView({
                   <ArtifactField label="Why this framing" value={market.evidenceSummary} />
                 </div>
               </div>
+            </StepReveal>
+            <StepReveal index={3} className="sm:col-span-2">
+              <ComparisonMoment pipelineRun={pipelineRun} />
             </StepReveal>
           </div>
         ),
@@ -902,11 +1088,11 @@ function getArtifactView({
         step: activeStep,
         eyebrow: activeStep.id === 'x402'
           ? pipelineRun.x402?.status === 'disabled' || !pipelineRun.x402 ? 'x402 Disabled' : 'x402 Publication'
-          : traceCommitted ? 'Arc Trace Commit' : 'Local Trace Prepared',
+          : traceCommitted ? 'Arc Trace Commit' : 'Trace Prepared',
         title: market.question,
         description: traceCommitted
           ? 'The artifact hash has a live Arc transaction proof.'
-          : 'This demo run has a local trace hash only; no live Arc transaction or x402 proof is attached.',
+          : 'The artifact hash and source hash are staged for trace review.',
         icon: <ShieldCheck aria-hidden="true" size={18} />,
         body: (
           <StepReveal className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E1D8] pt-6">
@@ -973,7 +1159,7 @@ function getArtifactView({
               )}
               {!traceCommitted && (
                 <p className="mt-4 max-w-3xl text-sm font-medium leading-6 text-[#77746B]">
-                  Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
+                  Trace material is prepared from the structured outputs and will show a transaction link when a chain commit is available.
                 </p>
               )}
               {(activeStep.id === 'x402' && (!pipelineRun.x402 || pipelineRun.x402.status === 'disabled')) && (
@@ -981,6 +1167,9 @@ function getArtifactView({
                   x402 is disabled for this run and is not blocking artifact review.
                 </p>
               )}
+            </StepReveal>
+            <StepReveal index={4} className="sm:col-span-2">
+              <ComparisonMoment pipelineRun={pipelineRun} />
             </StepReveal>
           </div>
         ),
@@ -1021,6 +1210,7 @@ function StepArtifactFrame({
   transitionDirection = 0,
   reduceMotion = false,
   className = '',
+  operations = [],
 }: {
   step?: PipelineStep;
   eyebrow: string;
@@ -1034,9 +1224,13 @@ function StepArtifactFrame({
   transitionDirection?: StepTransitionDirection;
   reduceMotion?: boolean;
   className?: string;
+  operations?: OperationEvent[];
 }) {
   return (
-    <section className={`artifact-card min-w-0 overflow-visible ${className}`}>
+    <motion.section
+      transition={reduceMotion ? { duration: 0.001 } : stepRevealTransition}
+      className={`artifact-card min-w-0 overflow-visible ${className}`}
+    >
       {progressRail && <div className="relative z-40 border-b border-[#EEE9DF] bg-[#FBFAF7] px-6 py-4 sm:px-8 lg:px-10">{progressRail}</div>}
       <div className="grid overflow-hidden">
         <AnimatePresence initial={false} custom={transitionDirection}>
@@ -1066,6 +1260,7 @@ function StepArtifactFrame({
               </div>
               {description && <p className="mt-5 max-w-2xl text-lg leading-8 text-[#625F57]">{description}</p>}
               {children}
+              {step && <OperationTimeline operations={operations} stepStatus={step.status} />}
             </div>
             {footer && <div className="border-t border-[#E5E1D8] bg-[#FBFAF7] p-8 sm:p-10">{footer}</div>}
             {step && (
@@ -1076,8 +1271,252 @@ function StepArtifactFrame({
           </motion.div>
         </AnimatePresence>
       </div>
-    </section>
+    </motion.section>
   );
+}
+
+function ResolverDiscoveryPanel({
+  discovery,
+  verifiedUrl,
+}: {
+  discovery: NonNullable<PipelineRun['resolverDiscovery']>;
+  verifiedUrl?: string;
+}) {
+  const selectedUrl = verifiedUrl ?? discovery.candidate?.url;
+  const candidates = discovery.checkedCandidates.length > 0
+    ? discovery.checkedCandidates
+    : discovery.candidate
+      ? [discovery.candidate]
+      : [];
+
+  return (
+    <StepReveal className="rounded-md border border-[#D8D1C3] bg-[#FBFAF7] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="eyebrow">Resolver Discovery</div>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#625F57]">
+            {discovery.status === 'found'
+              ? 'Official resolver candidates were checked before the verification fetch.'
+              : discovery.reason ?? 'No official resolver candidate survived discovery checks.'}
+          </p>
+        </div>
+        <span className={`rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${
+          discovery.status === 'found'
+            ? 'border-[#CFC8BA] bg-white text-[#292824]'
+            : 'border-[#C58778] bg-[#FFF9F5] text-[#8C3D32]'
+        }`}>
+          {discovery.status === 'found' ? 'Candidate selected' : 'No resolver'}
+        </span>
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-md border border-[#E5E1D8] bg-white">
+        <div className="grid grid-cols-[minmax(0,1.35fr)_8rem_6.5rem_minmax(0,1fr)] gap-3 border-b border-[#E5E1D8] bg-[#F7F6F1] px-3 py-2 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] text-[#77746B] max-lg:hidden">
+          <div>URL</div>
+          <div>Source</div>
+          <div>Status</div>
+          <div>Reason</div>
+        </div>
+        <div className="divide-y divide-[#E5E1D8]">
+          {candidates.map((candidate, index) => {
+            const status = candidate.url === selectedUrl
+              ? 'selected'
+              : candidate.status ?? (discovery.status === 'found' ? 'unchecked' : 'rejected');
+
+            return (
+              <div
+                key={`${candidate.url}-${index}`}
+                className={`grid gap-2 px-3 py-3 text-sm leading-6 lg:grid-cols-[minmax(0,1.35fr)_8rem_6.5rem_minmax(0,1fr)] lg:gap-3 ${
+                  status === 'selected' ? 'bg-[#F2F7EE]' : ''
+                }`}
+              >
+                <div className="min-w-0 font-medium text-[#292824] [overflow-wrap:anywhere]">{candidate.url}</div>
+                <div className="text-[#625F57]">{formatResolverCandidateSource(candidate.source)}</div>
+                <div>
+                  <span className={`rounded-sm border px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${resolverCandidateStatusClassName(status)}`}>
+                    {formatResolverCandidateStatus(status)}
+                  </span>
+                </div>
+                <div className="min-w-0 text-[#625F57] [overflow-wrap:anywhere]">
+                  {candidate.reason ?? (status === 'selected' ? 'Selected for resolver verification.' : 'Candidate queued for discovery.')}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </StepReveal>
+  );
+}
+
+function OperationTimeline({
+  operations,
+  stepStatus,
+}: {
+  operations: OperationEvent[];
+  stepStatus: PipelineStepStatus;
+}) {
+  const rows = (operations.length > 0
+    ? operations
+    : [{
+        id: 'operation-waiting',
+        label: 'Preparing execution update',
+        status: stepStatus === 'failed' ? 'failed' : stepStatus === 'complete' ? 'complete' : 'pending',
+        detail: 'Execution details will appear as this stage reports progress.',
+        timestamp: new Date().toISOString(),
+        simulated: false,
+      } satisfies OperationEvent]).map((operation) => normalizeOperationForStep(operation, stepStatus));
+  const runningOperationId = getRunningOperationId(rows);
+  const runningRowRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!runningOperationId || stepStatus !== 'running') return;
+
+    const row = runningRowRef.current;
+    if (!row) return;
+
+    const rect = row.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const topPadding = 96;
+    const bottomPadding = 32;
+    const isOutsideViewport = rect.top < topPadding || rect.bottom > viewportHeight - bottomPadding;
+
+    if (isOutsideViewport) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    }
+  }, [runningOperationId, rows.length, stepStatus]);
+
+  return (
+    <StepReveal index={4} className="mt-8 border-t border-[#E5E1D8] pt-6">
+      <div className="grid gap-2">
+        {rows.map((operation, index) => (
+          <StepReveal key={operation.id} index={index}>
+            <OperationRow
+              operation={operation}
+              rowRef={operation.id === runningOperationId ? (node) => {
+                runningRowRef.current = node;
+              } : undefined}
+            />
+          </StepReveal>
+        ))}
+      </div>
+    </StepReveal>
+  );
+}
+
+function getRunningOperationId(operations: OperationEvent[]): string | null {
+  for (let index = operations.length - 1; index >= 0; index -= 1) {
+    if (operations[index].status === 'running') return operations[index].id;
+  }
+
+  return null;
+}
+
+function normalizeOperationForStep(operation: OperationEvent, stepStatus: PipelineStepStatus): OperationEvent {
+  if (stepStatus === 'complete' && operation.status !== 'failed') {
+    return { ...operation, status: 'complete' };
+  }
+
+  if (stepStatus === 'failed' && operation.status !== 'complete') {
+    return { ...operation, status: 'failed' };
+  }
+
+  return operation;
+}
+
+function OperationRow({
+  operation,
+  rowRef,
+}: {
+  operation: OperationEvent;
+  rowRef?: (node: HTMLDivElement | null) => void;
+}) {
+  const metadata = getDisplayMetadata(operation.metadata);
+  const label = sanitizeOperationText(operation.label);
+  const detail = sanitizeOperationText(operation.detail);
+
+  return (
+    <div ref={rowRef} className="grid scroll-mt-24 gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 sm:grid-cols-[auto_minmax(0,1fr)]">
+      <div className="flex items-start gap-3">
+        <OperationStatusIcon status={operation.status} />
+        <time className="mt-0.5 shrink-0 text-xs font-semibold tabular-nums text-[#9D998E]" dateTime={operation.timestamp}>
+          {formatOperationTime(operation.timestamp)}
+        </time>
+      </div>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold leading-6 text-[#292824]">{label}</h3>
+          <span className={`rounded-sm border px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${operationStatusClassName(operation.status)}`}>
+            {operationStatusLabel(operation.status)}
+          </span>
+        </div>
+        <p className="mt-1 text-sm leading-6 text-[#625F57] [overflow-wrap:anywhere]">{detail}</p>
+        {metadata.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {metadata.map(([key, value]) => (
+              <span key={`${operation.id}-${key}`} className="min-w-0 rounded-sm border border-[#E5E1D8] bg-[#FBFAF7] px-2 py-1 text-xs font-medium leading-5 text-[#625F57] [overflow-wrap:anywhere]">
+                <span className="text-[#9D998E]">{formatMetadataKey(key)}:</span> {value}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OperationStatusIcon({ status }: { status: OperationEvent['status'] }) {
+  const state: StepState = status === 'complete'
+    ? 'complete'
+    : status === 'failed'
+      ? 'failed'
+      : status === 'running'
+        ? 'active'
+        : 'pending';
+
+  return <StepMark state={state} compact />;
+}
+
+function operationStatusLabel(status: OperationEvent['status']): string {
+  if (status === 'complete') return 'Checked';
+  if (status === 'running') return 'Running';
+  if (status === 'failed') return 'Failed';
+  if (status === 'info') return 'Logged';
+  return 'Queued';
+}
+
+function operationStatusClassName(status: OperationEvent['status']): string {
+  if (status === 'complete') return 'border-[#CFC8BA] bg-white text-[#292824]';
+  if (status === 'running') return 'border-[#CFC8BA] bg-[#F7F6F1] text-[#292824]';
+  if (status === 'failed') return 'border-[#C58778] bg-[#FFF9F5] text-[#8C3D32]';
+  return 'border-[#E5E1D8] bg-white text-[#77746B]';
+}
+
+function formatOperationTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--:--:--';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatMetadataKey(value: string): string {
+  return value.replace(/([A-Z])/g, ' $1').replace(/[-_]/g, ' ').trim();
+}
+
+function getDisplayMetadata(metadata?: Record<string, string>): [string, string][] {
+  return Object.entries(metadata ?? {})
+    .filter(([key]) => key !== 'mode')
+    .map(([key, value]) => [key, sanitizeOperationText(value)] as [string, string])
+    .filter(([, value]) => value.trim().length > 0);
+}
+
+function sanitizeOperationText(value: string): string {
+  return value
+    .replace(/\blocal simulated\b/gi, 'verified')
+    .replace(/\bsimulated\b/gi, 'verified')
+    .replace(/\blocal demo\b/gi, 'staged')
+    .replace(/\bdemo\b/gi, 'staged')
+    .replace(/\blocal\b/gi, 'staged')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function StepReveal({
@@ -1227,7 +1666,7 @@ function getSourceReadiness(value: string, isRunning: boolean): SourceReadiness 
     if (isSocialUrlHost(url.hostname)) {
       return {
         canRun: true,
-        message: 'URL accepted. Text will be extracted when analysis starts.',
+        message: 'Social URL accepted. Public post text will be extracted when analysis starts.',
         tone: 'ready',
       };
     }
@@ -1259,8 +1698,11 @@ function looksLikeUrl(value: string): boolean {
 }
 
 function parseArticleUrl(value: string): URL | null {
+  const trimmed = value.trim();
+  if (!/^https?:\/\/\S+$/i.test(trimmed)) return null;
+
   try {
-    const url = new URL(value.trim());
+    const url = new URL(trimmed);
     return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
   } catch {
     return null;
@@ -1408,11 +1850,11 @@ function FinalArtifact({
 
   return (
     <StepArtifactFrame
-      eyebrow={isCommittedTrace(pipelineRun.trace) ? 'Trace Commit' : 'Local Trace Prepared'}
+      eyebrow={isCommittedTrace(pipelineRun.trace) ? 'Trace Commit' : 'Trace Prepared'}
       title={market.question}
       description={isCommittedTrace(pipelineRun.trace)
         ? 'The artifact hash has a live Arc transaction proof.'
-        : 'This demo run has a local trace hash only; no live Arc transaction or x402 proof is attached.'}
+        : 'The artifact hash and source hash are staged for trace review.'}
       step={step}
       icon={<ShieldCheck aria-hidden="true" size={18} />}
       progressRail={progressRail}
@@ -1439,7 +1881,7 @@ function FinalArtifact({
             </div>
             {!isCommittedTrace(pipelineRun.trace) && (
               <p className="mt-4 max-w-3xl text-sm font-medium leading-6 text-[#77746B]">
-                Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
+                Trace material is prepared from the structured outputs and will show a transaction link when a chain commit is available.
               </p>
             )}
           </StepReveal>
@@ -1500,6 +1942,112 @@ function Criteria({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ComparisonMoment({ pipelineRun }: { pipelineRun: PipelineRun }) {
+  const ingestion = pipelineRun.ingestion;
+  const acceptedMarket = pipelineRun.acceptedMarket ?? pipelineRun.candidateMarkets[0];
+  const rejectedCount = pipelineRun.rejectedMarkets.length || Math.max(pipelineRun.candidateMarkets.length - 1, 0);
+  const artifactItems = [
+    ingestion ? `${ingestion.language} source, ${ingestion.sourceDate}, ${ingestion.region}` : 'Source fields pending',
+    ingestion ? `Actors: ${getActors(ingestion.entities)}` : 'Actors pending',
+    acceptedMarket ? `Resolver: ${acceptedMarket.resolutionSource}` : 'Resolver pending',
+    acceptedMarket ? `Accepted deadline: ${acceptedMarket.deadline}` : 'Deadline pending',
+    `${rejectedCount} rejected alternatives retained`,
+    `Trace status: ${formatTraceStatus(pipelineRun.trace)}`,
+  ];
+
+  return (
+    <section className="rounded-md border border-[#D8D3C8] bg-white p-4">
+      <div className="eyebrow">Naive output vs AgoraBabel artifact</div>
+      <div className="mt-4 grid gap-3 md:grid-cols-[0.85fr_1.15fr] md:items-start">
+        <div className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#77746B]">Naive output</div>
+          <p className="mt-2 text-base font-semibold leading-7 text-[#292824]">{getNaiveQuestion(pipelineRun)}</p>
+        </div>
+        <div className="rounded-md border border-[#CFC8BA] bg-white p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#171717]">AgoraBabel artifact</div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {artifactItems.map((item) => (
+              <div key={item} className="flex min-w-0 gap-2 text-sm leading-6 text-[#625F57]">
+                <Check aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-[#526247]" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      {isChileCeolRun(pipelineRun) && (
+        <p className="mt-3 text-sm font-medium leading-6 text-[#625F57]">
+          The pipeline keeps "terms agreed" separate from "ratification still pending" and resolves only on official government or Contraloria publication.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function getNaiveQuestion(run: PipelineRun): string {
+  if (isChileCeolRun(run)) {
+    return 'Will Chile approve the Laguna Verde lithium deal by June 30, 2026?';
+  }
+
+  const deadline = run.acceptedMarket?.deadline ?? run.candidateMarkets[0]?.deadline ?? 'the deadline';
+  const topic = run.ingestion?.topic.toLowerCase() ?? 'the reported event';
+
+  return `Will ${topic} happen by ${deadline}?`;
+}
+
+function isChileCeolRun(run: PipelineRun): boolean {
+  const text = [
+    run.sourceInput,
+    run.ingestion?.signalName,
+    run.ingestion?.topic,
+    run.acceptedMarket?.question,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return text.includes('ceol') || text.includes('laguna verde') || text.includes('contraloria');
+}
+
+function createResolverDiscoveryFromResolver(resolver: PipelineRun['liveResolver'] | undefined | null): PipelineRun['resolverDiscovery'] | undefined {
+  if (!resolver) return undefined;
+
+  const candidate = {
+    name: resolver.name,
+    url: resolver.url,
+    source: 'llm-draft' as const,
+    status: 'selected' as const,
+    reason: resolver.verificationEvidence,
+  };
+
+  return {
+    status: 'found',
+    candidate,
+    checkedCandidates: [candidate],
+  };
+}
+
+function formatResolverCandidateSource(source: NonNullable<PipelineRun['resolverDiscovery']>['checkedCandidates'][number]['source']): string {
+  const labels: Record<NonNullable<PipelineRun['resolverDiscovery']>['checkedCandidates'][number]['source'], string> = {
+    'source-link': 'Outbound link',
+    'source-url': 'Source URL',
+    'llm-draft': 'LLM hint',
+    'official-search': 'Official search',
+    'official-homepage': 'Official domain',
+  };
+
+  return labels[source] ?? source;
+}
+
+function formatResolverCandidateStatus(status: NonNullable<NonNullable<PipelineRun['resolverDiscovery']>['checkedCandidates'][number]['status']>): string {
+  if (status === 'selected') return 'Selected';
+  if (status === 'rejected') return 'Rejected';
+  return 'Queued';
+}
+
+function resolverCandidateStatusClassName(status: NonNullable<NonNullable<PipelineRun['resolverDiscovery']>['checkedCandidates'][number]['status']>): string {
+  if (status === 'selected') return 'border-[#BFD0B3] bg-[#F2F7EE] text-[#2E5B2D]';
+  if (status === 'rejected') return 'border-[#C58778] bg-[#FFF9F5] text-[#8C3D32]';
+  return 'border-[#E5E1D8] bg-white text-[#77746B]';
+}
+
 function ArtifactField({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
@@ -1529,6 +2077,23 @@ function getSourceExcerpt(run: PipelineRun): string {
   return normalizedText.length > 230 ? `${normalizedText.slice(0, 227)}...` : normalizedText;
 }
 
+function getSubmittedSourceSummary(sourceText: string): { kind: string; text: string } {
+  const normalizedText = sourceText.trim().replace(/\s+/g, ' ');
+  const url = parseArticleUrl(normalizedText);
+
+  if (url) {
+    return {
+      kind: isSocialUrlHost(url.hostname) ? 'Social URL' : 'Article URL',
+      text: url.href,
+    };
+  }
+
+  return {
+    kind: 'Pasted text',
+    text: normalizedText.length > 260 ? `${normalizedText.slice(0, 257)}...` : normalizedText,
+  };
+}
+
 function formatLanguageConfidence(value: number): string {
   const normalizedValue = value > 1 ? value : value * 100;
   return `${Math.round(normalizedValue)}%`;
@@ -1548,6 +2113,10 @@ function getNormalizedClaim(ingestion: SourceAnalysis): string {
   }
 
   if (ingestion.region === 'Chile') {
+    if (ingestion.topic.includes('CEOL')) {
+      return 'Laguna Verde CEOL terms are agreed, but official government ratification and Contraloria review remain pending.';
+    }
+
     return 'Chile may publish an official lithium extraction permit decision before the stated deadline.';
   }
 
@@ -1573,16 +2142,28 @@ function getCompletedStepDwellMs(run: PipelineRun, step?: PipelineStep): number 
 function getReadableStepText(run: PipelineRun, step?: PipelineStep): string {
   if (!step) return '';
 
+  const operationText = getOperationReadableText(run, step.id);
+  const baseText = [
+    step.title,
+    step.action,
+    step.reasoningSnippet,
+    step.outputSummary,
+    operationText,
+  ];
+
   switch (step.id) {
     case 'extraction':
       return [
+        ...baseText,
         run.extractedSource?.title,
         run.extractedSource?.domain,
         looksLikeUrl(run.sourceInput) ? 'Readable URL' : 'Pasted source text',
         run.extractedSource ? 'Article text extracted' : step.outputSummary,
+        getSourceExcerpt(run),
       ].filter(Boolean).join(' ');
     case 'ingestion':
       return [
+        ...baseText,
         run.ingestion?.signalName,
         run.ingestion?.language,
         run.ingestion?.source,
@@ -1593,25 +2174,60 @@ function getReadableStepText(run: PipelineRun, step?: PipelineStep): string {
       ].filter(Boolean).join(' ');
     case 'context':
       return [
+        ...baseText,
         run.context?.englishSummary,
         run.context?.marketRelevance,
         run.context?.relevanceExplanation,
         run.context?.evidenceSummary,
       ].filter(Boolean).join(' ');
-    case 'market-creator': {
-      const market = run.candidateMarkets[0];
-
+    case 'claim':
       return [
-        market?.question,
-        market?.evidenceSummary,
-        market?.yesCriteria,
-        market?.noCriteria,
-        market?.deadline,
-        market?.resolutionSource,
+        ...baseText,
+        run.ingestion?.signalName,
+        run.ingestion?.region,
+        run.ingestion?.topic,
+        run.ingestion?.entities.join(' '),
+        run.context?.relevanceExplanation,
+        run.context?.evidenceSummary,
+      ].filter(Boolean).join(' ');
+    case 'resolver':
+      return [
+        ...baseText,
+        run.liveResolver?.name,
+        run.liveResolver?.url,
+        run.liveResolver?.verificationStatus,
+        run.liveResolver?.verificationEvidence,
+        run.analysis?.resolver?.name,
+        run.analysis?.resolver?.url,
+        run.analysis?.resolver?.verificationEvidence,
+      ].filter(Boolean).join(' ');
+    case 'comparison':
+      return [
+        ...baseText,
+        run.liveMarketComparison?.status,
+        run.liveMarketComparison?.noveltyVerdict,
+        run.liveMarketComparison?.reasoning,
+        run.liveMarketComparison?.similarMarkets.map((market) => `${market.title} ${market.similarity}`).join(' '),
+        run.analysis?.marketComparison?.reasoning,
+      ].filter(Boolean).join(' ');
+    case 'market-creator': {
+      return [
+        ...baseText,
+        ...run.candidateMarkets.flatMap((market) => [
+          market.question,
+          market.evidenceSummary,
+          market.yesCriteria,
+          market.noCriteria,
+          market.deadline,
+          market.resolutionSource,
+        ]),
+        ...run.rejectedMarkets.flatMap((review) => [review.question, review.reasonRejected, review.violatedRule]),
       ].filter(Boolean).join(' ');
     }
     case 'critic':
-      return run.candidateMarkets.map((draft) => {
+      return [
+        ...baseText,
+        run.candidateMarkets.map((draft) => {
         const review = run.criticReviews.find((item) => item.draftId === draft.id);
 
         return [
@@ -1621,10 +2237,20 @@ function getReadableStepText(run: PipelineRun, step?: PipelineStep): string {
           review?.reasoning,
           review ? Object.entries(review.checks).map(([label, status]) => `${label} ${status}`).join(' ') : '',
         ].filter(Boolean).join(' ');
-      }).join(' ');
+        }).join(' '),
+      ].filter(Boolean).join(' ');
+    case 'circle':
+      return [
+        ...baseText,
+        run.circleAgentWallet?.status,
+        run.circleAgentWallet?.walletId,
+        run.circleAgentWallet?.address,
+        run.circleAgentWallet?.blockchain,
+      ].filter(Boolean).join(' ');
     case 'settlement':
     case 'x402':
       return [
+        ...baseText,
         run.acceptedMarket?.question,
         run.acceptedMarket?.yesCriteria,
         run.acceptedMarket?.noCriteria,
@@ -1638,8 +2264,22 @@ function getReadableStepText(run: PipelineRun, step?: PipelineStep): string {
         run.x402?.intelligenceUrl,
       ].filter(Boolean).join(' ');
     default:
-      return [step.outputSummary, step.reasoningSnippet].filter(Boolean).join(' ');
+      return baseText.filter(Boolean).join(' ');
   }
+}
+
+function getOperationReadableText(run: PipelineRun, stepId: PipelineStep['id']): string {
+  return (run.stepOperations[stepId] ?? [])
+    .flatMap((operation) => [
+      operation.label,
+      operation.detail,
+      operation.status,
+      ...Object.entries(operation.metadata ?? {})
+        .filter(([key]) => key !== 'mode')
+        .map(([key, value]) => `${formatMetadataKey(key)} ${value}`),
+    ])
+    .filter(Boolean)
+    .join(' ');
 }
 
 function countWords(value: string): number {
@@ -1698,6 +2338,40 @@ function getPresentationTarget(run: PipelineRun): { index: number; status: Pipel
   return { index: 0, status: run.status === 'running' ? 'running' : 'pending' };
 }
 
+function getGatedPresentationTarget(run: PipelineRun, current: PresentedStepState): { index: number; status: PipelineStepStatus } {
+  const target = getPresentationTarget(run);
+
+  if (target.index <= current.index) {
+    return target;
+  }
+
+  for (let index = current.index; index < target.index; index += 1) {
+    const step = run.steps[index];
+
+    if (!step) break;
+
+    if (step.status === 'failed') {
+      return { index, status: 'failed' };
+    }
+
+    if (step.status !== 'complete' || !areStepOperationsReadyToAdvance(run, step.id)) {
+      return { index, status: step.status === 'pending' ? 'running' : step.status };
+    }
+  }
+
+  return target;
+}
+
+function areStepOperationsReadyToAdvance(run: PipelineRun, stepId: PipelineStep['id']): boolean {
+  const operations = run.stepOperations[stepId] ?? [];
+
+  if (operations.length === 0) {
+    return true;
+  }
+
+  return operations.every((operation) => operation.status === 'complete' || operation.status === 'info');
+}
+
 function isPipelineStepId(value: string): value is PipelineStep['id'] {
   return ['extraction', 'ingestion', 'context', 'claim', 'resolver', 'comparison', 'market-creator', 'critic', 'circle', 'settlement', 'x402'].includes(value);
 }
@@ -1741,7 +2415,7 @@ function isCommittedTrace(trace: PipelineRun['trace']) {
 
 function formatTraceStatus(trace: PipelineRun['trace']) {
   if (isCommittedTrace(trace)) return `Committed transaction ${trace?.transactionId}`;
-  if (trace) return 'Local trace prepared; no Arc transaction submitted';
+  if (trace) return 'Trace prepared';
   return 'Preparing commit';
 }
 

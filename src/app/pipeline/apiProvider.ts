@@ -5,6 +5,7 @@ import type {
   ActivityEvent,
   ArcTrace,
   ContextAnalysis,
+  OperationEvent,
   PipelineInput,
   PipelineErrorBrief,
   PipelineProvider,
@@ -18,11 +19,21 @@ import type {
 const STAGE_PACING_ENABLED = import.meta.env.VITE_DEMO_PACING === 'true';
 const STAGE_MIN_MS = 850;
 let activitySequence = 0;
+let operationSequence = 0;
+
+type StreamEvent =
+  | { type: 'run-started'; runId: string }
+  | { type: 'step-started'; runId: string; stage: PipelineStage; message: string }
+  | { type: 'step-note'; runId: string; stage: PipelineStage; message: string }
+  | { type: 'step-completed'; runId: string; stage: PipelineStage; message: string; artifact?: unknown }
+  | { type: 'trace-committed'; runId: string; trace: NonNullable<AnalysisResult['arcTrace']> }
+  | { type: 'run-completed'; runId: string; analysis: AnalysisResult }
+  | { type: 'run-failed'; runId?: string; stage: PipelineErrorBrief['stage']; error: string; likelyCause: string; details?: string[] };
 
 const stageOrder: PipelineStep[] = [
   createStep('extraction', 'Source Extraction', 'Source Extractor', 'Extract readable source text. URL inputs must produce real article text.', 'Waiting for submitted evidence.', 'No source extracted yet.', 'source-extraction'),
   createStep('claim', 'Claim Extraction', 'Claim Extractor', 'Extract event claim, actors, source language, evidence snippets, and deadline.', 'Waiting for source extraction.', 'No claim extracted yet.', 'claim-extraction'),
-  createStep('resolver', 'Resolver Verification', 'Resolver Verifier', 'Fetch and verify the exact official resolver URL.', 'Waiting for claim extraction.', 'No resolver verified yet.', 'resolver-verification'),
+  createStep('resolver', 'Official Resolver', 'Resolver Discovery', 'Discover and verify the exact official resolver URL.', 'Waiting for claim extraction.', 'No official resolver found yet.', 'resolver-verification'),
   createStep('comparison', 'Market Comparison', 'Market Scout', 'Check configured market sources for similar existing markets.', 'Waiting for resolver verification.', 'No novelty check completed yet.', 'market-comparison'),
   createStep('market-creator', 'Market Drafting', 'Market Drafter', 'Draft one supported candidate and source-specific rejected alternatives.', 'Waiting for market comparison.', 'No market drafted yet.', 'market-drafting'),
   createStep('critic', 'Critic Review', 'Critic', 'Enforce binary wording, deadline, official resolver, novelty, and placeholder checks.', 'Waiting for drafted candidates.', 'No critic verdict yet.', 'critic-review'),
@@ -42,66 +53,191 @@ export class ApiPipelineProvider implements PipelineProvider {
 
     emitProductEvent('source_submitted', { runId: run.id, sourceType: looksLikeUrl(input.sourceText) ? 'url' : 'text' });
     run = appendActivity(run, 'Source Queue', 'running', 'No-fallback analysis started.', 'The API must return verified evidence, Circle wallet proof, Arc commit, and x402 metadata before accepting a market.');
+    run = appendOperation(run, 'extraction', {
+      label: 'Source submitted',
+      status: 'running',
+      detail: 'Browser posted source to the live streaming analyzer.',
+      metadata: {
+        input: looksLikeUrl(input.sourceText) ? 'url' : 'text',
+        stream: '/api/analyze/stream',
+      },
+    });
     yield { type: 'run-started', run };
 
     try {
-      const apiStartedAt = performance.now();
-      let analysis: AnalysisResult;
+      let terminalEventReceived = false;
 
-      try {
-        analysis = await analyzeSource(submission.sourceText);
-      } catch (error) {
-        const brief = createPipelineErrorBrief(error, submission.sourceText);
-        const failedStepId = stepIdForStage(brief.stage);
+      for await (const event of streamAnalyzeSource(submission.sourceText, input.signal)) {
+        if (event.type === 'run-started') {
+          run = updateRun(run, { id: event.runId });
+          run = appendOperation(run, 'extraction', {
+            label: 'Run ID assigned',
+            status: 'info',
+            detail: 'Backend accepted the stream request and returned a run identifier.',
+            metadata: { run: event.runId },
+          });
+          yield { type: 'run-started', run };
+          continue;
+        }
 
-        await paceStage(apiStartedAt);
-        run = markStepsThroughFailure(run, failedStepId);
-        run = updateRun(run, { status: 'failed', error: brief.message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
-        run = appendActivity(run, labelForStep(failedStepId), 'failed', brief.message, brief.likelyCause);
-        emitProductEvent('analysis_failed', { runId: run.id, stage: String(brief.stage), sourceType: looksLikeUrl(input.sourceText) ? 'url' : 'text' });
-        yield { type: 'step-completed', run, step: run.steps.find((step) => step.id === failedStepId)! };
-        yield { type: 'run-failed', run, error: brief.message };
-        return;
-      }
+        if (event.type === 'step-started') {
+          const stepId = stepIdForStage(event.stage);
+          run = updateStepText(run, stepId, { reasoningSnippet: event.message });
+          run = updateStep(run, stepId, 'running');
+          run = appendActivity(run, labelForStep(stepId), 'running', event.message, 'Backend stage started.');
+          run = appendOperation(run, stepId, {
+            label: liveOperationLabelForStage(event.stage, 'start'),
+            status: 'running',
+            detail: event.message,
+            metadata: liveOperationMetadataForStage(event.stage, run, undefined, 'start'),
+          });
+          yield { type: 'step-started', run, step: run.steps.find((step) => step.id === stepId)! };
+          continue;
+        }
 
-      const resolvedRun = createRunFromAnalysis(run, analysis, elapsedMs(startedAt));
+        if (event.type === 'step-note') {
+          const stepId = stepIdForStage(event.stage);
+          run = updateStepText(run, stepId, { reasoningSnippet: event.message });
+          run = appendActivity(run, labelForStep(stepId), 'running', event.message, 'Live backend progress note.');
+          run = appendOperation(run, stepId, {
+            label: liveOperationLabelForStage(event.stage, 'note'),
+            status: 'running',
+            detail: event.message,
+            metadata: liveOperationMetadataForStage(event.stage, run, undefined, 'note'),
+          });
+          yield { type: 'step-note', run, step: run.steps.find((step) => step.id === stepId)! };
+          continue;
+        }
 
-      for (const step of resolvedRun.steps) {
-        run = hydrateStep(run, step);
-        run = updateStep(run, step.id, 'running');
-        run = appendActivity(run, step.agentName, 'running', step.action, step.reasoningSnippet);
-        const stageStartedAt = performance.now();
-        yield { type: 'step-started', run, step: run.steps.find((item) => item.id === step.id)! };
+        if (event.type === 'step-completed') {
+          const stepId = stepIdForStage(event.stage);
+          run = revealStreamArtifact(run, event.stage, event.artifact);
+          run = updateStepText(run, stepId, { outputSummary: event.message });
+          run = completeStepOperations(run, stepId);
+          run = updateStep(run, stepId, 'complete');
+          run = appendActivity(run, labelForStep(stepId), 'complete', event.message, stageCompletionReasoning(event.stage, event.artifact));
+          run = appendOperation(run, stepId, {
+            label: liveOperationLabelForStage(event.stage, 'complete'),
+            status: 'complete',
+            detail: event.message,
+            metadata: liveOperationMetadataForStage(event.stage, run, event.artifact, 'complete'),
+          });
+          yield { type: 'step-completed', run, step: run.steps.find((step) => step.id === stepId)! };
+          continue;
+        }
 
-        await paceStage(stageStartedAt);
+        if (event.type === 'trace-committed') {
+          const trace = toClientTraceFromArcTrace(event.trace);
+          run = updateRun(run, { status: 'trace-committed', trace });
+          run = appendOperation(run, 'settlement', {
+            label: 'Arc transaction recorded',
+            status: trace.status === 'committed' ? 'complete' : 'failed',
+            detail: trace.status === 'committed' ? 'Trace registry transaction returned from Arc Testnet.' : 'Arc trace commit returned a failed status.',
+            metadata: {
+              artifact: trace.artifactHash ?? trace.traceHash,
+              source: trace.sourceHash ?? 'pending',
+              transaction: trace.transactionId,
+              network: trace.network,
+            },
+          });
+          yield { type: 'trace-committed', run, trace };
+          continue;
+        }
 
-        run = revealStepArtifacts(run, resolvedRun, step.id);
-        run = updateStep(run, step.id, step.status);
-        run = appendActivity(run, step.agentName, step.status, step.outputSummary, step.reasoningSnippet);
-        yield { type: 'step-completed', run, step: run.steps.find((item) => item.id === step.id)! };
+        if (event.type === 'run-completed') {
+          terminalEventReceived = true;
+          const parsed = AnalysisResultSchema.safeParse(event.analysis);
+          if (!parsed.success) {
+            throw new AnalysisRequestError(
+              'The streaming API returned an invalid strict artifact payload.',
+              200,
+              'response-validation',
+              'The backend stream completed with a payload that did not match AnalysisResultSchema.',
+              parsed.error.issues.map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`),
+            );
+          }
 
-        if (step.status === 'failed') {
-          break;
+          const resolvedRun = createRunFromAnalysis(run, parsed.data, elapsedMs(startedAt));
+          if (parsed.data.status === 'rejected') {
+            const message = parsed.data.rejectionReason ?? 'The API rejected the market before acceptance.';
+            run = updateRun(resolvedRun, { status: 'rejected', analyzedInMs: elapsedMs(startedAt) });
+            run = appendOperation(run, stepIdForStage(parsed.data.stage), {
+              label: 'Strict artifact rejected',
+              status: 'failed',
+              detail: message,
+              metadata: { stage: parsed.data.stage },
+            });
+            emitProductEvent('analysis_rejected', { runId: run.id, stage: parsed.data.stage });
+            yield { type: 'run-completed', run };
+            return;
+          }
+
+          if (!resolvedRun.acceptedMarket || !resolvedRun.trace || resolvedRun.trace.status !== 'committed') {
+            const message = 'The API completed without the required accepted market and committed trace.';
+            const brief = createRejectionBrief(message, parsed.data.stage, submission.sourceText);
+            run = updateRun(resolvedRun, { status: 'failed', error: message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
+            run = appendOperation(run, stepIdForStage(parsed.data.stage), {
+              label: 'Strict artifact invalid',
+              status: 'failed',
+              detail: message,
+              metadata: { stage: parsed.data.stage },
+            });
+            emitProductEvent('analysis_failed', { runId: run.id, stage: parsed.data.stage });
+            yield { type: 'run-failed', run, error: message };
+            return;
+          }
+
+          run = updateRun(resolvedRun, { status: 'complete', analyzedInMs: elapsedMs(startedAt) });
+          run = appendActivity(run, 'Artifact Generation', 'accepted', 'Verified market intelligence artifact is ready.', resolvedRun.acceptedMarket.criticReasoning);
+          run = appendOperation(run, 'x402', {
+            label: 'Final artifact ready',
+            status: 'complete',
+            detail: 'Validated market intelligence artifact is ready to open.',
+            metadata: {
+              artifact: resolvedRun.acceptedMarket.id,
+              run: resolvedRun.id,
+            },
+          });
+          emitProductEvent('market_accepted', { runId: run.id, artifactId: resolvedRun.acceptedMarket.id });
+          yield { type: 'run-completed', run };
+          return;
+        }
+
+        if (event.type === 'run-failed') {
+          terminalEventReceived = true;
+          const error = new AnalysisRequestError(event.error, 200, String(event.stage), event.likelyCause, event.details);
+          const brief = createPipelineErrorBrief(error, submission.sourceText);
+          const failedStepId = stepIdForStage(brief.stage);
+          run = markStepsThroughFailure(run, failedStepId);
+          run = failStepOperations(run, failedStepId);
+          run = updateRun(run, { status: 'failed', error: brief.message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
+          run = appendActivity(run, labelForStep(failedStepId), 'failed', brief.message, brief.likelyCause);
+          run = appendOperation(run, failedStepId, {
+            label: 'Stage failed',
+            status: 'failed',
+            detail: brief.message,
+            metadata: { stage: String(brief.stage) },
+          });
+          emitProductEvent('analysis_failed', { runId: run.id, stage: String(brief.stage), sourceType: looksLikeUrl(input.sourceText) ? 'url' : 'text' });
+          yield { type: 'step-completed', run, step: run.steps.find((step) => step.id === failedStepId)! };
+          yield { type: 'run-failed', run, error: brief.message };
+          return;
         }
       }
 
-      if (analysis.status !== 'accepted' || !resolvedRun.acceptedMarket || !resolvedRun.trace || resolvedRun.trace.status !== 'committed') {
-        const message = analysis.rejectionReason ?? 'The API rejected the market before acceptance.';
-        const brief = createRejectionBrief(message, analysis.stage, submission.sourceText);
-        run = updateRun(run, { status: 'failed', error: message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
-        emitProductEvent('analysis_failed', { runId: run.id, stage: analysis.stage });
-        yield { type: 'run-failed', run, error: message };
+      if (!terminalEventReceived) {
+        throw new AnalysisRequestError(
+          'The streaming API ended before the pipeline completed.',
+          200,
+          'api',
+          'The SSE connection closed without run-completed or run-failed.',
+        );
+      }
+    } catch (error) {
+      if (input.signal?.aborted || isAbortError(error)) {
         return;
       }
 
-      run = updateRun(run, { status: 'trace-committed', trace: resolvedRun.trace });
-      yield { type: 'trace-committed', run, trace: resolvedRun.trace };
-
-      run = updateRun(run, { status: 'complete', analyzedInMs: elapsedMs(startedAt) });
-      run = appendActivity(run, 'Artifact Generation', 'accepted', 'Verified market intelligence artifact is ready.', resolvedRun.acceptedMarket.criticReasoning);
-      emitProductEvent('market_accepted', { runId: run.id, artifactId: resolvedRun.acceptedMarket.id });
-      yield { type: 'run-completed', run };
-    } catch (error) {
       const brief = createPipelineErrorBrief(error, submission.sourceText);
       run = updateRun(run, { status: 'failed', error: brief.message, errorBrief: brief, analyzedInMs: elapsedMs(startedAt) });
       run = appendActivity(run, 'Orchestrator', 'failed', brief.message, brief.likelyCause);
@@ -124,7 +260,7 @@ class AnalysisRequestError extends Error {
   }
 }
 
-async function analyzeSource(sourceText: string): Promise<AnalysisResult> {
+async function analyzeSource(sourceText: string, signal?: AbortSignal): Promise<AnalysisResult> {
   let response: Response;
 
   try {
@@ -132,8 +268,13 @@ async function analyzeSource(sourceText: string): Promise<AnalysisResult> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sourceText }),
+      signal,
     });
   } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw error;
+    }
+
     throw new AnalysisRequestError(
       error instanceof Error ? error.message : 'The browser could not reach /api/analyze.',
       undefined,
@@ -162,6 +303,243 @@ async function analyzeSource(sourceText: string): Promise<AnalysisResult> {
   }
 
   return parsed.data;
+}
+
+async function* streamAnalyzeSource(sourceText: string, signal?: AbortSignal): AsyncGenerator<StreamEvent> {
+  let response: Response;
+
+  try {
+    response = await fetch('/api/analyze/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify({ sourceText }),
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw error;
+    }
+
+    throw new AnalysisRequestError(
+      error instanceof Error ? error.message : 'The browser could not reach /api/analyze/stream.',
+      undefined,
+      'network',
+      'The Vite API middleware may not be running, or the local dev server could not be reached.',
+      ['Run pnpm dev from the repository root and retry.'],
+    );
+  }
+
+  if (!response.ok || !response.body) {
+    const payload: unknown = await response.json().catch(() => null);
+    const errorPayload = parseErrorPayload(payload);
+    throw new AnalysisRequestError(errorPayload.message, response.status, errorPayload.stage, errorPayload.likelyCause, errorPayload.details);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      if (signal?.aborted) {
+        return;
+      }
+
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() ?? '';
+
+      for (const frame of frames) {
+        const event = parseSseFrame(frame);
+        if (event) yield event;
+      }
+
+      if (done) break;
+    }
+
+    const finalEvent = parseSseFrame(buffer);
+    if (finalEvent) yield finalEvent;
+  } finally {
+    if (signal?.aborted) {
+      await reader.cancel().catch(() => undefined);
+    }
+  }
+}
+
+function parseSseFrame(frame: string): StreamEvent | null {
+  const data = frame
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n');
+
+  if (!data) return null;
+
+  try {
+    const parsed = JSON.parse(data) as StreamEvent;
+    return typeof parsed?.type === 'string' ? parsed : null;
+  } catch {
+    throw new AnalysisRequestError(
+      'The streaming API returned malformed SSE data.',
+      200,
+      'response-validation',
+      'A server-sent event could not be parsed as JSON.',
+      [data.slice(0, 200)],
+    );
+  }
+}
+
+function revealStreamArtifact(run: PipelineRun, stage: PipelineStage, artifact: unknown): PipelineRun {
+  const value = isRecord(artifact) ? artifact : {};
+
+  if (stage === 'source-extraction') {
+    const url = typeof value.url === 'string' ? value.url : '';
+    const title = typeof value.title === 'string' ? value.title : 'Submitted source';
+    const domain = typeof value.domain === 'string' ? value.domain : url ? new URL(url).hostname : 'Pasted source';
+
+    return updateRun(run, {
+      extractedSource: {
+        title,
+        domain,
+        url,
+        text: typeof value.extractedTextHash === 'string' ? `Extracted text hash ${value.extractedTextHash.slice(0, 12)}...` : 'Source extracted.',
+      },
+    });
+  }
+
+  if (stage === 'claim-extraction') {
+    const claim = isRecord(value.claim) ? value.claim : {};
+    const source = isRecord(value.source) ? value.source : {};
+    const evidence = Array.isArray(claim.evidence)
+      ? claim.evidence.filter(isRecord).map((item) => String(item.text ?? '')).filter(Boolean).join(' ')
+      : '';
+
+    return updateRun(run, {
+      ingestion: {
+        signalName: String(claim.summary ?? 'Claim extracted'),
+        language: String(source.language ?? 'Unknown'),
+        languageConfidence: 100,
+        source: run.extractedSource?.domain ?? 'Submitted source',
+        sourceUrl: run.extractedSource?.url || undefined,
+        sourceDate: typeof source.publishedAt === 'string' ? source.publishedAt.slice(0, 10) : 'Unpublished or unavailable',
+        entities: Array.isArray(claim.actors) ? claim.actors.map(String) : [],
+        region: String(claim.region ?? 'Unknown'),
+        topic: String(claim.eventType ?? 'Event'),
+      },
+      context: {
+        englishSummary: String(claim.summary ?? 'Claim extracted.'),
+        marketRelevance: 'Medium',
+        relevanceExplanation: 'Structured claim fields validated; novelty check is still pending.',
+        evidenceSummary: evidence,
+      },
+    });
+  }
+
+  if (stage === 'market-drafting') {
+    const candidateMarkets = Array.isArray(value.candidateMarkets) ? value.candidateMarkets.map(toClientMarket) : run.candidateMarkets;
+    const rejectedMarkets = Array.isArray(value.rejectedMarkets)
+      ? value.rejectedMarkets as PipelineRun['rejectedMarkets']
+      : run.rejectedMarkets;
+    return updateRun(run, { candidateMarkets, rejectedMarkets });
+  }
+
+  if (stage === 'resolver-discovery') {
+    return updateRun(run, { resolverDiscovery: value as PipelineRun['resolverDiscovery'] });
+  }
+
+  if (stage === 'resolver-verification') {
+    return updateRun(run, { liveResolver: value as PipelineRun['liveResolver'] });
+  }
+
+  if (stage === 'market-comparison') {
+    return updateRun(run, {
+      liveMarketComparison: value as PipelineRun['liveMarketComparison'],
+      context: run.context ? {
+        ...run.context,
+        marketRelevance: value.noveltyVerdict === 'new-opportunity' ? 'High' : 'Low',
+        relevanceExplanation: String(value.reasoning ?? run.context.relevanceExplanation),
+      } : run.context,
+    });
+  }
+
+  if (stage === 'critic-review') {
+    const criticVerdict = isRecord(value.criticVerdict) ? value.criticVerdict as PipelineRun['criticReviews'][number] : undefined;
+    const acceptedMarket = isRecord(value.acceptedMarket)
+      ? { ...toClientMarket(value.acceptedMarket as AnalysisResult['candidateMarkets'][number]), criticReasoning: criticVerdict?.reasoning ?? 'Critic verdict accepted.' }
+      : undefined;
+
+    return updateRun(run, {
+      criticReviews: criticVerdict ? [criticVerdict] : run.criticReviews,
+      acceptedMarket,
+    });
+  }
+
+  if (stage === 'circle-wallet') {
+    return updateRun(run, { circleAgentWallet: value as PipelineRun['circleAgentWallet'] });
+  }
+
+  if (stage === 'arc-trace-commit') {
+    return updateRun(run, { trace: toClientTraceFromArcTrace(value as NonNullable<AnalysisResult['arcTrace']>) });
+  }
+
+  if (stage === 'x402-publication') {
+    return updateRun(run, { x402: value as PipelineRun['x402'] });
+  }
+
+  return run;
+}
+
+function stageCompletionReasoning(stage: PipelineStage, artifact: unknown) {
+  const value = isRecord(artifact) ? artifact : {};
+
+  if (stage === 'source-extraction' && typeof value.extractedTextHash === 'string') {
+    return `Extracted text hash ${value.extractedTextHash.slice(0, 12)}...`;
+  }
+
+  if (stage === 'claim-extraction') return 'Structured JSON was parsed and schema-validated before display.';
+  if (stage === 'resolver-discovery') {
+    const candidate = isRecord(value.candidate) ? value.candidate : undefined;
+    return value.status === 'found'
+      ? `Official resolver candidate selected: ${String(candidate?.url ?? 'candidate selected')}`
+      : String(value.reason ?? 'No official resolver candidate found.');
+  }
+  if (stage === 'resolver-verification') return String(value.verificationEvidence ?? 'Resolver fetch and identity checks passed.');
+  if (stage === 'market-comparison') return String(value.reasoning ?? 'Novelty check completed.');
+  if (stage === 'market-drafting') return 'Candidate and rejected alternatives are normalized from validated fields.';
+  if (stage === 'critic-review') return String(isRecord(value.criticVerdict) ? value.criticVerdict.reasoning ?? 'Critic checks passed.' : 'Critic checks passed.');
+  if (stage === 'circle-wallet') return String(value.address ?? value.error ?? 'Circle wallet status checked.');
+  if (stage === 'arc-trace-commit') return String(value.artifactHash ?? 'Arc trace committed.');
+  if (stage === 'x402-publication') return String(value.payToAddress ?? 'x402 publication ready.');
+  return 'Backend stage completed.';
+}
+
+function toClientTraceFromArcTrace(trace: NonNullable<AnalysisResult['arcTrace']>): ArcTrace {
+  return {
+    traceHash: trace.artifactHash,
+    transactionId: trace.transactionHash,
+    network: `${trace.network} (${trace.chainId})`,
+    status: trace.status,
+    timestamp: trace.committedAt,
+    explorerUrl: trace.explorerUrl,
+    artifactHash: trace.artifactHash,
+    sourceHash: trace.sourceHash,
+    chainId: trace.chainId,
+  };
+}
+
+function updateStepText(
+  run: PipelineRun,
+  stepId: PipelineStep['id'],
+  updates: Partial<Pick<PipelineStep, 'reasoningSnippet' | 'outputSummary'>>,
+): PipelineRun {
+  return updateRun(run, {
+    steps: run.steps.map((step) => (step.id === stepId ? { ...step, ...updates } : step)),
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function createRunFromAnalysis(run: PipelineRun, analysis: AnalysisResult, analyzedInMs: number): PipelineRun {
@@ -213,15 +591,18 @@ function createContextAnalysis(analysis: AnalysisResult): ContextAnalysis {
   return {
     englishSummary: analysis.claim.summary,
     marketRelevance: analysis.status === 'accepted' ? 'High' : 'Low',
-    relevanceExplanation: analysis.marketComparison.reasoning,
+    relevanceExplanation: analysis.marketComparison?.reasoning ?? analysis.rejectionReason ?? 'No market comparison ran.',
     evidenceSummary: analysis.claim.evidence.map((item) => item.text).join(' '),
   };
 }
 
 function createPipelineSteps(analysis: AnalysisResult): PipelineStep[] {
   const failedStage = analysis.status === 'rejected' ? analysis.stage : null;
+  const failedStepId = failedStage ? stepIdForStage(failedStage) : null;
+  const failedIndex = failedStepId ? stageOrder.findIndex((step) => step.id === failedStepId) : -1;
   return stageOrder.map((step) => {
-    const status = failedStage && step.stage === failedStage ? 'failed' : 'complete';
+    const stepIndex = stageOrder.findIndex((item) => item.id === step.id);
+    const status = failedIndex === -1 ? 'complete' : stepIndex < failedIndex ? 'complete' : stepIndex === failedIndex ? 'failed' : 'pending';
     return {
       ...step,
       status,
@@ -241,10 +622,14 @@ function outputForStage(analysis: AnalysisResult, stage: PipelineStage, mode: 'r
       return mode === 'summary'
         ? `${analysis.claim.eventType} in ${analysis.claim.region}; deadline ${analysis.claim.deadline}.`
         : analysis.claim.summary;
+    case 'resolver-discovery':
+      return mode === 'summary'
+        ? analysis.resolver ? `${analysis.resolver.name} discovered.` : 'No official resolver found.'
+        : analysis.rejectionReason ?? analysis.resolver?.verificationEvidence ?? 'Official resolver discovery completed.';
     case 'resolver-verification':
-      return mode === 'summary' ? `${analysis.resolver.name} verified.` : analysis.resolver.verificationEvidence;
+      return mode === 'summary' ? `${analysis.resolver?.name ?? 'No resolver'} verified.` : analysis.resolver?.verificationEvidence ?? analysis.rejectionReason ?? 'No resolver verified.';
     case 'market-comparison':
-      return mode === 'summary' ? `Novelty verdict: ${analysis.marketComparison.noveltyVerdict}.` : analysis.marketComparison.reasoning;
+      return mode === 'summary' ? `Novelty verdict: ${analysis.marketComparison?.noveltyVerdict ?? 'not checked'}.` : analysis.marketComparison?.reasoning ?? 'Market comparison did not run.';
     case 'market-drafting':
       return mode === 'summary' ? analysis.candidateMarkets[0]?.question ?? 'No candidate market.' : `${analysis.rejectedMarkets.length} rejected alternatives retained.`;
     case 'critic-review':
@@ -362,12 +747,143 @@ function parseErrorPayload(payload: unknown) {
 }
 
 function stepIdForStage(stage: PipelineErrorBrief['stage']): PipelineStep['id'] {
+  if (stage === 'resolver-discovery') return 'resolver';
   const found = stageOrder.find((step) => step.stage === stage);
   return found?.id ?? 'extraction';
 }
 
 function labelForStep(stepId: PipelineStep['id']) {
   return stageOrder.find((step) => step.id === stepId)?.agentName ?? 'Pipeline';
+}
+
+function liveOperationLabelForStage(stage: PipelineStage, phase: 'start' | 'note' | 'complete'): string {
+  const fallback = phase === 'start' ? 'Stage started' : phase === 'note' ? 'Backend progress' : 'Stage completed';
+  const labels: Partial<Record<PipelineStage, Record<typeof phase, string>>> = {
+    'source-extraction': { start: 'Source read started', note: 'Extraction progress', complete: 'Extracted text hashed' },
+    'claim-extraction': { start: 'LLM schema pass started', note: 'Structured fields extracted', complete: 'Strict JSON validated' },
+    'resolver-discovery': { start: 'Resolver discovery started', note: 'Resolver search running', complete: 'Resolver candidate recorded' },
+    'resolver-verification': { start: 'Resolver fetch started', note: 'Resolver identity checked', complete: 'Resolver evidence verified' },
+    'market-comparison': { start: 'Market-source scan started', note: 'Similarity scan running', complete: 'Novelty verdict recorded' },
+    'market-drafting': { start: 'Draft generation started', note: 'Alternatives staged', complete: 'Candidate draft accepted' },
+    'critic-review': { start: 'Critic rules started', note: 'Rule checks running', complete: 'Critic verdict recorded' },
+    'circle-wallet': { start: 'Circle wallet check started', note: 'Wallet status fetched', complete: 'Wallet proof ready' },
+    'arc-trace-commit': { start: 'Trace commit started', note: 'Proof hashes staged', complete: 'Trace transaction returned' },
+    'x402-publication': { start: 'x402 publication started', note: 'Gateway metadata staged', complete: 'Publication metadata ready' },
+  };
+
+  return labels[stage]?.[phase] ?? fallback;
+}
+
+function liveOperationMetadataForStage(
+  stage: PipelineStage,
+  run: PipelineRun,
+  artifact: unknown,
+  phase: 'start' | 'note' | 'complete',
+): Record<string, string> {
+  const value = isRecord(artifact) ? artifact : {};
+
+  if (stage === 'source-extraction') {
+    return compactMetadata({
+      input: stringValue(value.inputType) ?? (looksLikeUrl(run.sourceInput) ? 'url' : 'text'),
+      status: phase === 'complete' ? 'extracted' : 'fetch/read',
+      hash: shorten(stringValue(value.extractedTextHash)),
+      domain: stringValue(value.domain) ?? run.extractedSource?.domain,
+      title: stringValue(value.title),
+    });
+  }
+
+  if (stage === 'claim-extraction') {
+    const claim = isRecord(value.claim) ? value.claim : {};
+    const source = isRecord(value.source) ? value.source : {};
+    return compactMetadata({
+      llm: phase === 'complete' ? 'schema valid' : 'strict JSON',
+      language: stringValue(source.language) ?? run.ingestion?.language,
+      actors: Array.isArray(claim.actors) ? String(claim.actors.length) : run.ingestion ? String(run.ingestion.entities.length) : undefined,
+      event: stringValue(claim.eventType) ?? run.ingestion?.topic,
+      deadline: stringValue(claim.deadline) ?? run.acceptedMarket?.deadline,
+    });
+  }
+
+  if (stage === 'resolver-discovery') {
+    const candidate = isRecord(value.candidate) ? value.candidate : undefined;
+    const checkedCandidates = Array.isArray(value.checkedCandidates) ? value.checkedCandidates : undefined;
+    return compactMetadata({
+      status: stringValue(value.status),
+      candidate: stringValue(candidate?.url),
+      checked: checkedCandidates ? String(checkedCandidates.length) : undefined,
+      reason: shorten(stringValue(value.reason), 36),
+    });
+  }
+
+  if (stage === 'resolver-verification') {
+    return compactMetadata({
+      resolver: stringValue(value.name) ?? run.liveResolver?.name,
+      url: stringValue(value.url) ?? run.liveResolver?.url,
+      status: stringValue(value.verificationStatus) ?? run.liveResolver?.verificationStatus,
+      evidence: shorten(stringValue(value.verificationEvidence) ?? run.liveResolver?.verificationEvidence, 36),
+    });
+  }
+
+  if (stage === 'market-comparison') {
+    const similarMarkets = Array.isArray(value.similarMarkets) ? value.similarMarkets : run.liveMarketComparison?.similarMarkets;
+    return compactMetadata({
+      search: stringValue(value.status) ?? run.liveMarketComparison?.status,
+      similar: similarMarkets ? String(similarMarkets.length) : undefined,
+      verdict: stringValue(value.noveltyVerdict) ?? run.liveMarketComparison?.noveltyVerdict,
+    });
+  }
+
+  if (stage === 'market-drafting') {
+    const candidates = Array.isArray(value.candidateMarkets) ? value.candidateMarkets.length : run.candidateMarkets.length;
+    const rejected = Array.isArray(value.rejectedMarkets) ? value.rejectedMarkets.length : run.rejectedMarkets.length;
+    return compactMetadata({
+      candidates: String(candidates),
+      rejected: String(rejected),
+      accepted: run.acceptedMarket?.id ?? run.candidateMarkets[0]?.id,
+    });
+  }
+
+  if (stage === 'critic-review') {
+    const verdict = isRecord(value.criticVerdict) ? value.criticVerdict : run.criticReviews[0];
+    const checks = isRecord(verdict?.checks) ? verdict.checks : undefined;
+    const passCount = checks ? Object.values(checks).filter((status) => status === 'pass').length : undefined;
+    return compactMetadata({
+      verdict: stringValue(verdict?.decision),
+      draft: stringValue(verdict?.draftId),
+      checks: checks && passCount !== undefined ? `${passCount}/${Object.keys(checks).length} pass` : undefined,
+    });
+  }
+
+  if (stage === 'circle-wallet') {
+    return compactMetadata({
+      status: stringValue(value.status) ?? run.circleAgentWallet?.status,
+      wallet: stringValue(value.walletId) ?? run.circleAgentWallet?.walletId ?? undefined,
+      address: shorten(stringValue(value.address) ?? run.circleAgentWallet?.address ?? undefined, 18),
+      blockchain: stringValue(value.blockchain) ?? run.circleAgentWallet?.blockchain,
+    });
+  }
+
+  if (stage === 'arc-trace-commit') {
+    const trace = run.trace;
+    return compactMetadata({
+      artifact: shorten(stringValue(value.artifactHash) ?? trace?.artifactHash ?? trace?.traceHash),
+      source: shorten(stringValue(value.sourceHash) ?? trace?.sourceHash),
+      transaction: shorten(stringValue(value.transactionHash) ?? trace?.transactionId, 18),
+      status: stringValue(value.status) ?? trace?.status,
+    });
+  }
+
+  if (stage === 'x402-publication') {
+    return compactMetadata({
+      artifact: stringValue(value.artifactId) ?? run.x402?.artifactId,
+      price: typeof value.priceUsdcMicro === 'number' ? `${value.priceUsdcMicro / 1_000_000} USDC` : run.x402?.priceUsdcMicro ? `${run.x402.priceUsdcMicro / 1_000_000} USDC` : undefined,
+      gateway: stringValue(value.gatewayUrl) ?? run.x402?.gatewayUrl ?? undefined,
+      facilitator: stringValue(value.facilitatorUrl) ?? run.x402?.facilitatorUrl ?? undefined,
+      intelligence: stringValue(value.intelligenceUrl) ?? run.x402?.intelligenceUrl,
+    });
+  }
+
+  return {};
 }
 
 function createStep(
@@ -428,6 +944,85 @@ function appendActivity(
   });
 }
 
+function appendOperation(
+  run: PipelineRun,
+  stepId: PipelineStep['id'],
+  operation: Omit<OperationEvent, 'id' | 'timestamp' | 'simulated'>,
+): PipelineRun {
+  const nextOperation: OperationEvent = {
+    id: `operation-${operationSequence += 1}-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    simulated: false,
+    ...operation,
+    metadata: compactMetadata(operation.metadata),
+  };
+  const currentOperations = run.stepOperations[stepId] ?? [];
+  const settledOperations = settleOperationsBeforeAppend(currentOperations, nextOperation.status);
+
+  return updateRun(run, {
+    stepOperations: {
+      ...run.stepOperations,
+      [stepId]: [...settledOperations, nextOperation].slice(-8),
+    },
+  });
+}
+
+function settleOperationsBeforeAppend(
+  operations: OperationEvent[],
+  nextStatus: OperationEvent['status'],
+): OperationEvent[] {
+  if (nextStatus === 'pending') return operations;
+
+  return operations.map((operation) => {
+    if (operation.status !== 'running') return operation;
+
+    return {
+      ...operation,
+      status: nextStatus === 'failed' ? 'failed' : 'complete',
+    };
+  });
+}
+
+function completeStepOperations(run: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
+  const currentOperations = run.stepOperations[stepId] ?? [];
+
+  return updateRun(run, {
+    stepOperations: {
+      ...run.stepOperations,
+      [stepId]: currentOperations.map((operation) => operation.status === 'failed' ? operation : { ...operation, status: 'complete' }),
+    },
+  });
+}
+
+function failStepOperations(run: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
+  const currentOperations = run.stepOperations[stepId] ?? [];
+
+  return updateRun(run, {
+    stepOperations: {
+      ...run.stepOperations,
+      [stepId]: currentOperations.map((operation) => operation.status === 'complete' ? operation : { ...operation, status: 'failed' }),
+    },
+  });
+}
+
+function compactMetadata(metadata?: Record<string, string | undefined>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(metadata ?? {})
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0)
+      .map(([key, value]) => [key, value.length > 72 ? `${value.slice(0, 69)}...` : value]),
+  );
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+function shorten(value?: string, length = 14): string | undefined {
+  if (!value) return undefined;
+  if (value.length <= length) return value;
+  return `${value.slice(0, length)}...`;
+}
+
 function updateRun(run: PipelineRun, updates: Partial<PipelineRun>): PipelineRun {
   return {
     ...run,
@@ -452,9 +1047,16 @@ function elapsedMs(startedAt: number) {
   return Math.round(performance.now() - startedAt);
 }
 
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
 function looksLikeUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!/^https?:\/\/\S+$/i.test(trimmed)) return false;
+
   try {
-    const url = new URL(value.trim());
+    const url = new URL(trimmed);
     return url.protocol === 'http:' || url.protocol === 'https:';
   } catch {
     return false;

@@ -8,7 +8,7 @@ import type {
   X402PublicationStatus,
 } from './analysisSchema';
 
-export type AgentRunStatus = 'idle' | 'running' | 'trace-committed' | 'complete' | 'failed';
+export type AgentRunStatus = 'idle' | 'running' | 'trace-committed' | 'complete' | 'rejected' | 'failed';
 export type PipelineRunStatus = AgentRunStatus;
 export type PipelineStepStatus = 'pending' | 'running' | 'complete' | 'failed';
 export type MarketRelevance = 'Low' | 'Medium' | 'High';
@@ -111,6 +111,35 @@ export type ActivityEvent = {
   reasoningSnippet: string;
 };
 
+export type OperationEventStatus = 'pending' | 'running' | 'complete' | 'failed' | 'info';
+
+export type OperationEvent = {
+  id: string;
+  label: string;
+  status: OperationEventStatus;
+  detail: string;
+  timestamp: string;
+  metadata?: Record<string, string>;
+  simulated: boolean;
+};
+
+export type ResolverDiscoveryCandidateStatus = 'selected' | 'rejected' | 'unchecked';
+
+export type ResolverDiscoveryCandidate = {
+  name: string;
+  url: string;
+  source: 'source-link' | 'source-url' | 'llm-draft' | 'official-search' | 'official-homepage';
+  status?: ResolverDiscoveryCandidateStatus;
+  reason?: string;
+};
+
+export type ResolverDiscoveryArtifact = {
+  status: 'found' | 'not-found';
+  candidate?: ResolverDiscoveryCandidate;
+  checkedCandidates: ResolverDiscoveryCandidate[];
+  reason?: string;
+};
+
 export type PipelineErrorBrief = {
   title: string;
   stage: PipelineStep['id'] | PipelineStage | 'orchestrator' | 'api' | 'network';
@@ -137,9 +166,13 @@ export type AgentRun = {
   circleAgentWallet?: CircleAgentWalletStatus;
   x402?: X402PublicationStatus | null;
   analysis?: AnalysisResult;
+  resolverDiscovery?: ResolverDiscoveryArtifact;
+  liveResolver?: AnalysisResult['resolver'];
+  liveMarketComparison?: AnalysisResult['marketComparison'];
   analyzedInMs?: number;
   steps: PipelineStep[];
   activityFeed: ActivityEvent[];
+  stepOperations: Partial<Record<PipelineStep['id'], OperationEvent[]>>;
   createdAt: string;
   updatedAt: string;
   error?: string;
@@ -151,6 +184,7 @@ export type PipelineRun = AgentRun;
 export type PipelineInput = {
   sourceText: string;
   scenario?: DemoScenario;
+  signal?: AbortSignal;
 };
 
 export type TracePayload = {
@@ -183,6 +217,7 @@ export type DemoScenario = {
 export type PipelineRunUpdate =
   | { type: 'run-started'; run: PipelineRun }
   | { type: 'step-started'; run: PipelineRun; step: PipelineStep }
+  | { type: 'step-note'; run: PipelineRun; step: PipelineStep }
   | { type: 'step-completed'; run: PipelineRun; step: PipelineStep }
   | { type: 'trace-committed'; run: PipelineRun; trace: TraceRecord }
   | { type: 'run-completed'; run: PipelineRun }

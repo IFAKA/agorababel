@@ -4,13 +4,26 @@ import { AnalysisResultSchema, analyzeRequestSchema, type AnalysisResult, type P
 import { commitArcTrace } from './arcTrace';
 import { getCircleAgentWalletStatus } from './circleWallet';
 import { getMissingProductionConfig, getRuntimeStatus } from './config';
+import { enforceCritic } from './criticReview';
 import { handleEventsRequest } from './events';
 import { methodNotAllowed, readJson, sendError, sendJson } from './http';
 import { analyzeWithConfiguredLlm, type LlmDraft } from './llmStructured';
+import { normalizeCandidateMarkets } from './marketDrafting';
 import { compareMarketNovelty } from './marketComparison';
-import { verifyResolver } from './resolverVerification';
+import { discoverOfficialResolver, verifyResolver, type ResolverDiscoveryResult } from './resolverVerification';
 import { extractSource } from './sourceExtraction';
 import { handleMarketIntelligenceRequest, publishX402Artifact } from './x402';
+
+type PipelineProgressEvent =
+  | { type: 'run-started'; runId: string }
+  | { type: 'step-started'; runId: string; stage: PipelineStage; message: string }
+  | { type: 'step-note'; runId: string; stage: PipelineStage; message: string }
+  | { type: 'step-completed'; runId: string; stage: PipelineStage; message: string; artifact?: unknown }
+  | { type: 'trace-committed'; runId: string; trace: NonNullable<AnalysisResult['arcTrace']> }
+  | { type: 'run-completed'; runId: string; analysis: AnalysisResult }
+  | { type: 'run-failed'; runId?: string; stage: PipelineStage | 'request-validation'; error: string; likelyCause: string; details: string[] };
+
+type PipelineProgressEmitter = (event: PipelineProgressEvent) => void;
 
 export async function handleAnalyzeRequest(request: IncomingMessage, response: ServerResponse) {
   if (request.method !== 'POST') {
@@ -42,6 +55,49 @@ export async function handleAnalyzeRequest(request: IncomingMessage, response: S
   }
 }
 
+export async function handleAnalyzeStreamRequest(request: IncomingMessage, response: ServerResponse) {
+  if (request.method !== 'POST') {
+    methodNotAllowed(request, response, 'request', 'POST');
+    return;
+  }
+
+  response.statusCode = 200;
+  response.setHeader('Content-Type', 'text/event-stream;charset=utf-8');
+  response.setHeader('Cache-Control', 'no-cache, no-transform');
+  response.setHeader('Connection', 'keep-alive');
+  response.setHeader('X-Accel-Buffering', 'no');
+  response.flushHeaders?.();
+
+  const emit = (event: PipelineProgressEvent) => {
+    response.write(`event: ${event.type}\n`);
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  try {
+    failIfRuntimeNotReady();
+    const body = await readJson(request);
+    const parsedRequest = analyzeRequestSchema.safeParse(body);
+
+    if (!parsedRequest.success) {
+      throw new StageError('request-validation', parsedRequest.error.issues[0]?.message ?? 'Invalid source input.', parsedRequest.error.issues.map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`));
+    }
+
+    await runPipeline(parsedRequest.data.sourceText, emit);
+  } catch (error) {
+    const stage = error instanceof StageError ? error.stage : inferStage(error);
+    const message = error instanceof Error ? error.message : 'Analysis failed.';
+    emit({
+      type: 'run-failed',
+      stage,
+      error: message,
+      likelyCause: likelyCause(stage),
+      details: error instanceof StageError ? error.details : [],
+    });
+  } finally {
+    response.end();
+  }
+}
+
 export async function handleRuntimeStatusRequest(request: IncomingMessage, response: ServerResponse) {
   if (request.method !== 'GET') {
     methodNotAllowed(request, response, 'runtime-status', 'GET');
@@ -58,18 +114,136 @@ export async function handleRuntimeStatusRequest(request: IncomingMessage, respo
 
 export { handleEventsRequest, handleMarketIntelligenceRequest };
 
-async function runPipeline(sourceInput: string): Promise<AnalysisResult> {
+async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter): Promise<AnalysisResult> {
   const runId = `run-${createHash('sha1').update(`${Date.now()}:${sourceInput}`).digest('hex').slice(0, 12)}`;
+  emit?.({ type: 'run-started', runId });
 
   try {
-    const extracted = await atStage('source-extraction', () => extractSource(sourceInput));
-    const draft = await atStage('claim-extraction', () => analyzeWithConfiguredLlm(extracted.text));
+    const extracted = await atStage('source-extraction', runId, emit, () => extractSource(sourceInput), {
+      start: 'extracting readable source text',
+      heartbeat: ['fetching source content', 'normalizing source metadata', 'hashing extracted text'],
+      complete: 'source text extracted and hashed',
+      artifact: (value) => ({
+        inputType: value.inputType,
+        title: value.title,
+        url: value.url,
+        domain: value.domain,
+        outboundUrls: value.outboundUrls,
+        extractedTextHash: value.extractedTextHash,
+      }),
+    });
+    const draft = await atStage('claim-extraction', runId, emit, () => analyzeWithConfiguredLlm(extracted.text, {
+      onNote: (message) => emit?.({ type: 'step-note', runId, stage: 'claim-extraction', message }),
+    }), {
+      start: 'source text sent to configured LLM',
+      heartbeat: ['strict JSON draft generating', 'waiting for structured model response', 'validating draft against strict schema'],
+      complete: 'claim, resolver draft, candidates, and critic verdict parsed',
+      artifact: (value) => ({
+        source: {
+          language: value.source.language,
+          publishedAt: normalizeDateTimeOrNull(value.source.publishedAt),
+        },
+        claim: normalizeClaim(value),
+      }),
+    });
     requireDeadline(draft);
-    const resolver = await atStage('resolver-verification', () => verifyResolver(draft));
-    const marketComparison = await atStage('market-comparison', () => compareMarketNovelty(draft));
-    const candidateMarkets = atStageSync('market-drafting', () => normalizeCandidateMarkets(draft, resolver));
-    const criticVerdict = atStageSync('critic-review', () => enforceCritic(draft, marketComparison.noveltyVerdict));
-    const circleAgentWallet = await atStage('circle-wallet', () => getCircleAgentWalletStatus());
+    const resolverDiscovery = await atStage('resolver-discovery', runId, emit, () => discoverOfficialResolver({
+      draft,
+      sourceUrl: extracted.url,
+      outboundUrls: extracted.outboundUrls,
+      sourceText: extracted.text,
+    }), {
+      start: 'discovering official resolver candidates',
+      heartbeat: ['checking outbound source links', 'searching official domains', 'screening resolver candidates'],
+      complete: 'official resolver discovery completed',
+      artifact: (value) => value,
+    });
+
+    if (resolverDiscovery.status === 'not-found') {
+      const result = createResolverDiscoveryRejection(runId, extracted, draft, resolverDiscovery);
+      const validated = AnalysisResultSchema.safeParse(result);
+
+      if (!validated.success) {
+        throw new StageError('resolver-discovery', 'Resolver discovery rejection failed strict artifact schema validation.', validated.error.issues.map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`));
+      }
+
+      emit?.({ type: 'run-completed', runId, analysis: validated.data });
+      return validated.data;
+    }
+
+    const resolver = await atStage('resolver-verification', runId, emit, () => verifyResolver(resolverDiscovery.candidate, draft), {
+      start: `fetching discovered resolver URL ${resolverDiscovery.candidate.url}`,
+      heartbeat: ['checking resolver response', 'matching official body, date, and event signals'],
+      complete: 'official resolver URL verified',
+      artifact: (value) => value,
+    });
+    const marketComparison = await atStage('market-comparison', runId, emit, () => compareMarketNovelty(draft), {
+      start: 'checking configured public market sources',
+      heartbeat: ['querying market search sources', 'scanning actor and event overlap'],
+      complete: 'novelty check completed',
+      artifact: (value) => value,
+    });
+    const candidateMarkets = atStageSync('market-drafting', runId, emit, () => normalizeCandidateMarkets(draft, resolver), {
+      start: 'normalizing validated candidate market',
+      complete: 'accepted candidate and rejected alternatives prepared',
+      artifact: (value) => ({
+        candidateMarkets: value,
+        rejectedMarkets: draft.rejectedMarkets,
+      }),
+    });
+    const criticOutcome = atStageSync('critic-review', runId, emit, () => enforceCritic(draft, marketComparison.noveltyVerdict), {
+      start: 'enforcing binary, deadline, resolver, novelty, and placeholder checks',
+      complete: 'critic verdict recorded',
+      artifact: (value) => ({
+        criticVerdict: value.criticVerdict,
+        acceptedMarket: value.status === 'accepted' ? candidateMarkets[0] : null,
+        rejectionReason: value.status === 'rejected' ? value.rejectionReason : null,
+      }),
+    });
+
+    if (criticOutcome.status === 'rejected') {
+      const result = {
+        runId,
+        status: 'rejected' as const,
+        stage: 'critic-review' as const,
+        source: {
+          inputType: extracted.inputType,
+          title: extracted.title,
+          url: extracted.url,
+          domain: extracted.domain,
+          language: draft.source.language,
+          publishedAt: normalizeDateTimeOrNull(draft.source.publishedAt),
+          extractedTextHash: extracted.extractedTextHash,
+        },
+        claim: normalizeClaim(draft),
+        resolver,
+        marketComparison,
+        candidateMarkets,
+        rejectedMarkets: draft.rejectedMarkets,
+        criticVerdict: criticOutcome.criticVerdict,
+        acceptedMarket: null,
+        arcTrace: null,
+        circleAgentWallet: createNotRunCircleWalletStatus(),
+        x402: null,
+        rejectionReason: criticOutcome.rejectionReason,
+      };
+      const validated = AnalysisResultSchema.safeParse(result);
+
+      if (!validated.success) {
+        throw new StageError('critic-review', 'Rejected pipeline output failed strict artifact schema validation.', validated.error.issues.map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`));
+      }
+
+      emit?.({ type: 'run-completed', runId, analysis: validated.data });
+      return validated.data;
+    }
+
+    const criticVerdict = criticOutcome.criticVerdict;
+    const circleAgentWallet = await atStage('circle-wallet', runId, emit, () => getCircleAgentWalletStatus(), {
+      start: 'checking Circle ARC-TESTNET wallet proof',
+      heartbeat: ['requesting Circle wallet status', 'validating configured agent wallet address'],
+      complete: 'Circle wallet proof checked',
+      artifact: (value) => value,
+    });
 
     if (circleAgentWallet.status !== 'ready') {
       throw new StageError('circle-wallet', circleAgentWallet.error ?? 'Circle ARC-TESTNET wallet is not ready.');
@@ -101,20 +275,38 @@ async function runPipeline(sourceInput: string): Promise<AnalysisResult> {
       x402: null,
       rejectionReason: null,
     };
-    const arcTrace = await atStage('arc-trace-commit', () => commitArcTrace({
+    const arcTrace = await atStage('arc-trace-commit', runId, emit, () => commitArcTrace({
       runId,
       sourceHash: extracted.extractedTextHash,
       acceptedMarket,
       artifact: baseArtifact,
-    }));
+    }), {
+      start: 'submitting artifact hash to Arc Testnet trace registry',
+      heartbeat: ['waiting for Arc transaction hash', 'waiting for Arc transaction receipt'],
+      complete: 'Arc trace committed',
+      artifact: (value) => value,
+    });
+    emit?.({ type: 'trace-committed', runId, trace: arcTrace });
     const artifactWithTrace = { ...baseArtifact, arcTrace, stage: 'x402-publication' as const };
-    const x402 = publishX402Artifact(artifactWithTrace as AnalysisResult);
+    const x402 = atStageSync('x402-publication', runId, emit, () => publishX402Artifact(artifactWithTrace as AnalysisResult), {
+      start: 'publishing x402 intelligence access metadata',
+      complete: 'x402 publication metadata ready',
+      artifact: (value) => value,
+    });
 
-    return {
+    const result = {
       ...artifactWithTrace,
       stage: 'complete',
       x402,
     };
+    const validated = AnalysisResultSchema.safeParse(result);
+
+    if (!validated.success) {
+      throw new StageError('critic-review', 'Pipeline output failed strict artifact schema validation.', validated.error.issues.map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`));
+    }
+
+    emit?.({ type: 'run-completed', runId, analysis: validated.data });
+    return validated.data;
   } catch (error) {
     if (error instanceof StageError) throw error;
     throw new StageError(inferStage(error), error instanceof Error ? error.message : 'Pipeline failed.');
@@ -127,6 +319,55 @@ function failIfRuntimeNotReady() {
   if (missing.length > 0) {
     throw new StageError('runtime-config', 'AgoraBabel runtime is not ready for no-fallback analysis.', missing.map((item) => `Missing or invalid: ${item}`));
   }
+}
+
+function createResolverDiscoveryRejection(
+  runId: string,
+  extracted: Awaited<ReturnType<typeof extractSource>>,
+  draft: LlmDraft,
+  discovery: Extract<ResolverDiscoveryResult, { status: 'not-found' }>,
+): AnalysisResult {
+  const checkedCandidates = discovery.checkedCandidates.map((candidate) => candidate.url).slice(0, 5);
+  const rejectionReason = [
+    'Source analyzed, but no official resolver found.',
+    discovery.reason,
+    checkedCandidates.length ? `Candidate URLs checked: ${checkedCandidates.join(', ')}` : '',
+  ].filter(Boolean).join(' ');
+
+  return {
+    runId,
+    status: 'rejected',
+    stage: 'resolver-discovery',
+    source: {
+      inputType: extracted.inputType,
+      title: extracted.title,
+      url: extracted.url,
+      domain: extracted.domain,
+      language: draft.source.language,
+      publishedAt: normalizeDateTimeOrNull(draft.source.publishedAt),
+      extractedTextHash: extracted.extractedTextHash,
+    },
+    claim: normalizeClaim(draft),
+    resolver: null,
+    marketComparison: null,
+    candidateMarkets: [],
+    rejectedMarkets: draft.rejectedMarkets.slice(0, 4),
+    criticVerdict: {
+      ...draft.criticVerdict,
+      decision: 'rejected',
+      checks: {
+        ...draft.criticVerdict.checks,
+        resolver: 'fail',
+      },
+      failedRules: Array.from(new Set([...draft.criticVerdict.failedRules, 'resolver-discovery'])),
+      reasoning: rejectionReason,
+    },
+    acceptedMarket: null,
+    arcTrace: null,
+    circleAgentWallet: createNotRunCircleWalletStatus(),
+    x402: null,
+    rejectionReason,
+  };
 }
 
 function requireDeadline(draft: LlmDraft) {
@@ -143,61 +384,86 @@ function normalizeClaim(draft: LlmDraft) {
   };
 }
 
-function normalizeCandidateMarkets(draft: LlmDraft, resolver: Awaited<ReturnType<typeof verifyResolver>>) {
-  const accepted = draft.candidateMarkets[0];
-  if (!accepted) throw new StageError('market-drafting', 'Market drafting failed: no accepted candidate was produced.');
-
-  if (accepted.resolverUrl !== resolver.url) {
-    throw new StageError('market-drafting', 'Market drafting failed: candidate resolver URL does not match verified resolver URL.');
-  }
-
-  return [{
-    ...accepted,
-    deadline: draft.claim.deadline,
-    resolverName: resolver.name,
-    resolverUrl: resolver.url,
-  }];
+function createNotRunCircleWalletStatus(): AnalysisResult['circleAgentWallet'] {
+  return {
+    status: 'unconfigured',
+    walletId: null,
+    walletSetId: null,
+    address: null,
+    blockchain: 'ARC-TESTNET',
+    checkedAt: new Date().toISOString(),
+    error: 'Circle wallet check skipped because critic review rejected the candidate before acceptance.',
+  };
 }
 
-function enforceCritic(draft: LlmDraft, noveltyVerdict: 'new-opportunity' | 'duplicate' | 'too-close') {
-  const candidate = draft.candidateMarkets[0];
-  if (!candidate) throw new StageError('critic-review', 'Critic review failed: no candidate market exists.');
-  if (draft.criticVerdict.decision !== 'accepted') {
-    throw new StageError('critic-review', draft.rejectionReason ?? draft.criticVerdict.reasoning);
-  }
-  if (noveltyVerdict !== 'new-opportunity') {
-    throw new StageError('critic-review', 'Critic review failed: market is duplicate or too close to an existing market.');
-  }
-  if (draft.rejectedMarkets.length < 2) {
-    throw new StageError('critic-review', 'Critic review failed: at least two source-specific rejected candidates are required.');
-  }
-
-  const text = [candidate.question, candidate.yesCriteria, candidate.noCriteria, candidate.resolverName].join(' ');
-  if (!/\bwill\b/i.test(candidate.question) || !/\?/.test(candidate.question)) {
-    throw new StageError('critic-review', 'Critic review failed: accepted market must be a binary question.');
-  }
-  if (/\b(official sources|named authority|public authority|otherwise|market reaction|named public authority)\b/i.test(text)) {
-    throw new StageError('critic-review', 'Critic review failed: accepted market contains placeholder wording.');
-  }
-  if (Object.values(draft.criticVerdict.checks).some((value) => value !== 'pass')) {
-    throw new StageError('critic-review', `Critic review failed: ${draft.criticVerdict.failedRules.join(', ') || 'one or more checks failed'}.`);
+async function atStage<T>(
+  stage: PipelineStage,
+  runId: string,
+  emit: PipelineProgressEmitter | undefined,
+  operation: () => Promise<T>,
+  progress?: {
+    start?: string;
+    heartbeat?: string[];
+    complete?: string;
+    artifact?: (value: T) => unknown;
+  },
+): Promise<T> {
+  if (progress?.start) {
+    emit?.({ type: 'step-started', runId, stage, message: progress.start });
   }
 
-  return draft.criticVerdict;
-}
+  let heartbeatIndex = 0;
+  const heartbeat = progress?.heartbeat?.length
+    ? setInterval(() => {
+      const message = progress.heartbeat![heartbeatIndex % progress.heartbeat!.length];
+      heartbeatIndex += 1;
+      emit?.({ type: 'step-note', runId, stage, message });
+    }, 2500)
+    : undefined;
 
-async function atStage<T>(stage: PipelineStage, operation: () => Promise<T>): Promise<T> {
   try {
-    return await operation();
+    const value = await operation();
+    if (heartbeat) clearInterval(heartbeat);
+    emit?.({
+      type: 'step-completed',
+      runId,
+      stage,
+      message: progress?.complete ?? `Completed ${stage}.`,
+      artifact: progress?.artifact?.(value),
+    });
+    return value;
   } catch (error) {
+    if (heartbeat) clearInterval(heartbeat);
     if (error instanceof StageError) throw error;
     throw new StageError(stage, error instanceof Error ? error.message : `Pipeline failed at ${stage}.`);
   }
 }
 
-function atStageSync<T>(stage: PipelineStage, operation: () => T): T {
+function atStageSync<T>(
+  stage: PipelineStage,
+  runId: string,
+  emit: PipelineProgressEmitter | undefined,
+  operation: () => T,
+  progress?: {
+    start?: string;
+    complete?: string;
+    artifact?: (value: T) => unknown;
+  },
+): T {
+  if (progress?.start) {
+    emit?.({ type: 'step-started', runId, stage, message: progress.start });
+  }
+
   try {
-    return operation();
+    const value = operation();
+    emit?.({
+      type: 'step-completed',
+      runId,
+      stage,
+      message: progress?.complete ?? `Completed ${stage}.`,
+      artifact: progress?.artifact?.(value),
+    });
+    return value;
   } catch (error) {
     if (error instanceof StageError) throw error;
     throw new StageError(stage, error instanceof Error ? error.message : `Pipeline failed at ${stage}.`);
@@ -214,13 +480,14 @@ function normalizeDateTimeOrNull(value: string | null) {
 }
 
 class StageError extends Error {
-  constructor(
-    readonly stage: PipelineStage | 'request-validation',
-    message: string,
-    readonly details: string[] = [],
-  ) {
+  readonly stage: PipelineStage | 'request-validation';
+  readonly details: string[];
+
+  constructor(stage: PipelineStage | 'request-validation', message: string, details: string[] = []) {
     super(message);
     this.name = 'StageError';
+    this.stage = stage;
+    this.details = details;
   }
 }
 
@@ -228,6 +495,7 @@ function inferStage(error: unknown): PipelineStage {
   const message = error instanceof Error ? error.message.toLowerCase() : '';
   if (message.includes('circle')) return 'circle-wallet';
   if (message.includes('arc')) return 'arc-trace-commit';
+  if (message.includes('discovery')) return 'resolver-discovery';
   if (message.includes('resolver')) return 'resolver-verification';
   if (message.includes('comparison')) return 'market-comparison';
   if (message.includes('llm') || message.includes('groq') || message.includes('openai')) return 'claim-extraction';
@@ -241,6 +509,7 @@ function likelyCause(stage: string) {
     'request-validation': 'The submitted request body is missing a usable sourceText field.',
     'source-extraction': 'The source could not be extracted into enough readable article text.',
     'claim-extraction': 'The LLM did not extract required event, evidence, publication, and deadline fields.',
+    'resolver-discovery': 'No fetchable official resolver could be discovered from the source, outbound links, official domains, or search candidates.',
     'resolver-verification': 'The resolver URL could not be fetched or did not look like an official resolver.',
     'market-comparison': 'Configured market search/comparison could not complete.',
     'critic-review': 'The candidate market failed strict binary, deadline, resolver, novelty, or placeholder checks.',

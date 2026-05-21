@@ -9,8 +9,9 @@ This is a Vite React prototype for the AgoraBabel SaaS demo. The app entry point
 - `pnpm install` or `npm install`: install dependencies. The lockfile is `pnpm-lock.yaml`, so prefer pnpm when possible.
 - `pnpm dev` or `npm run dev`: start the Vite development server.
 - `pnpm build` or `npm run build`: create the production build in `dist/`.
+- `pnpm test:unit` or `npm run test:unit`: run Node built-in unit tests for server helpers.
 
-There is no configured lint, format, or test script in `package.json` yet. If you add one, document it here and keep it runnable from the repository root.
+There is no configured lint or format script in `package.json` yet. If you add one, document it here and keep it runnable from the repository root.
 
 ## Coding Style & Naming Conventions
 
@@ -18,7 +19,7 @@ Use TypeScript and React function components. Name components in PascalCase (`Ma
 
 ## Testing Guidelines
 
-No test script is currently configured in `package.json`. For behavior changes, manually verify the relevant flow with `pnpm dev` and run `pnpm build` before submitting. `transition-check.spec.js` is an ad hoc Playwright smoke check for workflow transitions, URLs, mobile layout, and reduced motion; if you rely on it, run it explicitly against a local dev server and document the command you used. If adding tests, colocate them near the code as `*.test.ts` or `*.test.tsx`, and prefer Vitest plus React Testing Library for unit/component coverage that matches the Vite stack.
+For behavior changes, manually verify the relevant flow with `pnpm dev` and run `pnpm build` before submitting. Use `pnpm test:unit` for server helper coverage. `transition-check.spec.js` is an ad hoc Playwright smoke check for workflow transitions, URLs, mobile layout, and reduced motion; if you rely on it, run it explicitly against a local dev server and document the command you used. If adding browser-facing tests, colocate them near the code as `*.test.ts` or `*.test.tsx`, and prefer Vitest plus React Testing Library for unit/component coverage that matches the Vite stack.
 
 ## Commit & Pull Request Guidelines
 

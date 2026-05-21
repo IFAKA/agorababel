@@ -1,18 +1,17 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, Check, Clock3, FileText, Github, Globe2, LoaderCircle, Pause, Play, RotateCcw, ShieldCheck, Star } from 'lucide-react';
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'motion/react';
-import type { Screen } from '../App';
 import { AgoraBabelTraceMark } from './AgoraBabelTraceMark';
 import { pageContainerClassName } from './pageLayout';
 
 const workflow = ['Source Extraction', 'Translation & Context', 'Validation Review', 'Audit Trace'];
 const repositoryUrl = 'https://github.com/IFAKA/agorababel';
-const demoSourceUrl = 'diarioregional.example/politica/levy-vote';
+const demoSourceUrl = 'diariofinanciero.example/chile/laguna-verde-ceol';
 
 const validationSteps = [
-  { label: 'Extract event claim', detail: 'Fuel levy vote identified', icon: FileText },
-  { label: 'Translate and contextualize', detail: 'Council procedure mapped', icon: Globe2 },
-  { label: 'Run schema checks', detail: 'Resolution criteria accepted', icon: ShieldCheck },
+  { label: 'Extract event claim', detail: 'Laguna Verde CEOL identified', icon: FileText },
+  { label: 'Translate and contextualize', detail: 'Terms agreed; ratification pending', icon: Globe2 },
+  { label: 'Run schema checks', detail: 'Official resolver required', icon: ShieldCheck },
 ] as const;
 
 const microdemoReadingDelaySeconds = 7.2;
@@ -83,11 +82,11 @@ const workflowItemMotion = {
 
 export function LandingScreen({
   introActive = false,
-  onNavigate,
+  onAnalyzeSource,
   onRunSampleArticle,
 }: {
   introActive?: boolean;
-  onNavigate: (screen: Screen) => void;
+  onAnalyzeSource: () => void;
   onRunSampleArticle: () => void;
 }) {
   const reduceMotion = useReducedMotion();
@@ -146,7 +145,7 @@ export function LandingScreen({
                 Convert local-language news into verified market drafts with resolution criteria, source-backed analysis, and audit trails.
               </motion.p>
               <motion.div variants={reduceMotion ? undefined : landingItemMotion} className="mt-7 flex flex-wrap gap-2">
-                <button type="button" onClick={() => onNavigate('create')} className="primary-button pressable px-5">
+                <button type="button" onClick={onAnalyzeSource} className="primary-button pressable px-5">
                   <span className="inline-flex items-center justify-center gap-2">
                     Analyze source
                     <ArrowRight aria-hidden="true" size={15} />
@@ -396,7 +395,7 @@ function MicrodemoCard({ reduceMotion }: { reduceMotion: boolean | null }) {
             >
               <div className="rounded-md bg-[#FBFAF7] p-3">
                 <p className="text-sm font-semibold leading-5 text-[#252521]">
-                  Council schedules final vote on emergency fuel levy repeal
+                  Laguna Verde CEOL terms agreed; ratification pending
                 </p>
                 <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-[#6B6962]">
                   <span className="size-1.5 shrink-0 rounded-full bg-[#B67332]" />
@@ -572,16 +571,16 @@ function MicrodemoCard({ reduceMotion }: { reduceMotion: boolean | null }) {
             >
               <div className="rounded-md border border-white/10 bg-white/[0.06] p-3">
                 <h2 className="text-sm font-semibold leading-5">
-                  Will the council repeal the emergency fuel levy by 30 June 2026?
+                  Will Chile officially ratify the Laguna Verde lithium CEOL before 2026-06-30?
                 </h2>
                 <div className="mt-2 grid gap-1.5 text-xs">
                   <div className="flex gap-2 rounded border border-white/10 bg-white/[0.08] px-2 py-1.5">
                     <div className="shrink-0 font-semibold text-[#F4F1EA]">YES</div>
-                    <p className="min-w-0 truncate text-[#CFC8BB]">Vote passes and repeal date is published.</p>
+                    <p className="min-w-0 truncate text-[#CFC8BB]">Government or Contraloria publishes ratification.</p>
                   </div>
                   <div className="flex gap-2 rounded border border-white/10 bg-white/[0.08] px-2 py-1.5">
                     <div className="shrink-0 font-semibold text-[#F4F1EA]">NO</div>
-                    <p className="min-w-0 truncate text-[#CFC8BB]">Vote fails, delays, or criteria remain unmet.</p>
+                    <p className="min-w-0 truncate text-[#CFC8BB]">No official publication by the deadline.</p>
                   </div>
                 </div>
               </div>

@@ -45,7 +45,8 @@ export function getRuntimeConfig() {
     x402Enabled: (process.env.X402_ENABLED ?? 'false').toLowerCase() === 'true',
     x402PriceUsdcMicro: Number(process.env.X402_PRICE_USDC_MICRO ?? '0'),
     x402PayToAddress: process.env.X402_PAY_TO_ADDRESS ?? '',
-    x402FacilitatorUrl: process.env.X402_FACILITATOR_URL ?? '',
+    x402FacilitatorUrl: process.env.X402_FACILITATOR_URL ?? 'https://gateway-api-testnet.circle.com',
+    x402BuyerPrivateKey: process.env.X402_BUYER_PRIVATE_KEY || process.env.ARC_COMMITTER_PRIVATE_KEY || '',
   } as const;
 }
 
@@ -67,7 +68,7 @@ export function getMissingProductionConfig() {
   if (config.x402Enabled) {
     if (!config.x402PriceUsdcMicro || config.x402PriceUsdcMicro <= 0) missing.push('X402_PRICE_USDC_MICRO');
     if (!config.x402PayToAddress) missing.push('X402_PAY_TO_ADDRESS');
-    if (!config.x402FacilitatorUrl) missing.push('X402_FACILITATOR_URL');
+    if (!config.x402BuyerPrivateKey) missing.push('X402_BUYER_PRIVATE_KEY or ARC_COMMITTER_PRIVATE_KEY');
   }
 
   return missing;
@@ -107,8 +108,10 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
         details: config.circleAgentWalletAddress || 'Circle ARC-TESTNET wallet config missing',
       },
       x402: {
-        status: config.x402Enabled && config.x402PayToAddress && config.x402FacilitatorUrl ? 'configured' : 'unconfigured',
-        details: config.x402Enabled ? 'x402 payment gate enabled' : 'X402_ENABLED=false',
+        status: config.x402Enabled && config.x402PayToAddress && config.x402PriceUsdcMicro > 0 && config.x402BuyerPrivateKey ? 'configured' : 'unconfigured',
+        details: config.x402Enabled
+          ? `Circle Gateway x402 enabled at ${config.x402FacilitatorUrl}`
+          : 'X402_ENABLED=false',
       },
     },
     missing: [...new Set(missing)],

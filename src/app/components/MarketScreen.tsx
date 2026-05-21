@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Clipboard, Download, ExternalLink, Share2 } from 'lucide-react';
+import { ArrowRight, Check, Clipboard, Download, ExternalLink, LoaderCircle, LockKeyhole, ReceiptText, Share2, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { emitProductEvent } from '../pipeline/apiProvider';
 import type { PipelineRun } from '../pipeline/types';
@@ -11,7 +11,7 @@ export function MarketScreen({
 }) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [unlockStatus, setUnlockStatus] = useState<'idle' | 'required' | 'failed' | 'disabled'>('idle');
+  const [unlockState, setUnlockState] = useState<X402UnlockState>({ status: 'idle' });
   const market = pipelineRun.acceptedMarket;
   const ingestion = pipelineRun.ingestion;
   const context = pipelineRun.context;
@@ -66,26 +66,51 @@ export function MarketScreen({
   const handleUnlock = async () => {
     if (!pipelineRun.x402 || !pipelineRun.x402.intelligenceUrl) return;
     if (pipelineRun.x402.status === 'disabled') {
-      setUnlockStatus('disabled');
+      setUnlockState({ status: 'disabled' });
       emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: 'disabled' });
       return;
     }
 
     emitProductEvent('x402_unlock_started', { artifactId: market?.id, runId: pipelineRun.id });
-    const response = await fetch(pipelineRun.x402.intelligenceUrl);
-    if (response.status === 402) {
-      setUnlockStatus('required');
+    setUnlockState({ status: 'checking' });
+
+    try {
+      const unpaidResponse = await fetch(pipelineRun.x402.intelligenceUrl);
+      const requiredProof = unpaidResponse.status === 402
+        ? await unpaidResponse.json().catch(() => null) as X402RequiredProof | null
+        : null;
+
+      if (unpaidResponse.status !== 402) {
+        setUnlockState({ status: unpaidResponse.ok ? 'unlocked' : 'failed' });
+        if (!unpaidResponse.ok) {
+          emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: String(unpaidResponse.status) });
+        }
+        return;
+      }
+
+      setUnlockState({ status: 'paying', requiredProof });
+      const unlockResponse = await fetch(pipelineRun.x402.demoUnlockUrl ?? pipelineRun.x402.intelligenceUrl.replace(/\/intelligence$/, '/demo-unlock'), {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      });
+      const payload = await unlockResponse.json().catch(() => null) as DemoUnlockPayload | null;
+
+      if (!unlockResponse.ok || payload?.status !== 'unlocked') {
+        setUnlockState({
+          status: 'failed',
+          requiredProof,
+          error: payload && 'error' in payload && typeof payload.error === 'string' ? payload.error : `HTTP ${unlockResponse.status}`,
+        });
+        emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: String(unlockResponse.status) });
+        return;
+      }
+
+      setUnlockState({ status: 'unlocked', requiredProof, unlock: payload });
+      emitProductEvent('x402_unlock_completed', { artifactId: market?.id, runId: pipelineRun.id });
+    } catch (error) {
+      setUnlockState({ status: 'failed', error: error instanceof Error ? error.message : 'Buyer-agent unlock failed.' });
       emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: 'payment-required' });
-      return;
     }
-
-    if (!response.ok) {
-      setUnlockStatus('failed');
-      emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: String(response.status) });
-      return;
-    }
-
-    emitProductEvent('x402_unlock_completed', { artifactId: market?.id, runId: pipelineRun.id });
   };
 
   useEffect(() => {
@@ -172,6 +197,8 @@ export function MarketScreen({
                   <p className="mt-2 max-w-4xl text-sm leading-6 text-[#625F57]">{createSourceExcerpt(pipelineRun.sourceInput)}</p>
                 </div>
 
+                <ArtifactComparison pipelineRun={pipelineRun} />
+
                 <div className="border-t border-[#E5E1D8] pt-4">
                   <p className="text-sm font-medium text-[#77746B]">Translation & Context</p>
                   <p className="mt-2 max-w-4xl text-sm leading-6 text-[#625F57]">{context.englishSummary}</p>
@@ -206,17 +233,23 @@ export function MarketScreen({
                 {analysis && (
                   <section className="grid gap-4 border-t border-[#E5E1D8] pt-4 lg:grid-cols-3">
                     <ProofPanel title="Official Resolver">
-                      <p className="text-sm font-semibold text-[#292824]">{analysis.resolver.name}</p>
-                      <a href={analysis.resolver.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 break-all text-sm font-medium text-[#305F72]">
-                        {analysis.resolver.url}
-                        <ExternalLink aria-hidden="true" size={13} />
-                      </a>
-                      <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.resolver.verificationEvidence}</p>
+                      {analysis.resolver ? (
+                        <>
+                          <p className="text-sm font-semibold text-[#292824]">{analysis.resolver.name}</p>
+                          <a href={analysis.resolver.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 break-all text-sm font-medium text-[#305F72]">
+                            {analysis.resolver.url}
+                            <ExternalLink aria-hidden="true" size={13} />
+                          </a>
+                          <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.resolver.verificationEvidence}</p>
+                        </>
+                      ) : (
+                        <p className="text-sm leading-6 text-[#625F57]">Source analyzed, but no official resolver found.</p>
+                      )}
                     </ProofPanel>
                     <ProofPanel title="Market Comparison">
-                      <p className="text-sm font-semibold text-[#292824]">{analysis.marketComparison.noveltyVerdict}</p>
-                      <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.marketComparison.reasoning}</p>
-                      <p className="mt-2 text-xs font-medium text-[#77746B]">{analysis.marketComparison.similarMarkets.length} similar markets listed</p>
+                      <p className="text-sm font-semibold text-[#292824]">{analysis.marketComparison?.noveltyVerdict ?? 'not checked'}</p>
+                      <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.marketComparison?.reasoning ?? analysis.rejectionReason ?? 'Market comparison did not run.'}</p>
+                      <p className="mt-2 text-xs font-medium text-[#77746B]">{analysis.marketComparison?.similarMarkets.length ?? 0} similar markets listed</p>
                     </ProofPanel>
                     <ProofPanel title="Circle Wallet">
                       <p className="text-sm font-semibold text-[#292824]">{analysis.circleAgentWallet.status} / {analysis.circleAgentWallet.blockchain}</p>
@@ -246,7 +279,7 @@ export function MarketScreen({
                       </a>
                     )}
                   </ProofPanel>
-                  <X402Panel x402={pipelineRun.x402} unlockStatus={unlockStatus} onUnlock={handleUnlock} />
+                  <X402Panel x402={pipelineRun.x402} unlockState={unlockState} onUnlock={handleUnlock} />
                 </section>
 
                 <section className="border-t border-[#E5E1D8] pt-4">
@@ -288,13 +321,53 @@ export function MarketScreen({
   );
 }
 
+type X402RequiredProof = {
+  artifactId?: string;
+  priceUsdcMicro?: number;
+  formattedPrice?: string;
+  payToAddress?: string;
+  network?: string;
+  gatewayUrl?: string;
+};
+
+type X402Receipt = {
+  payer: string;
+  seller: string;
+  priceUsdcMicro: number;
+  formattedPrice: string;
+  network: string;
+  settlementTransaction: string | null;
+};
+
+type DemoUnlockPayload = {
+  status?: 'unlocked';
+  artifactId?: string;
+  buyer?: string;
+  deposit?: null | {
+    status: 'submitted';
+    amountUsdc: string;
+    depositTxHash: string;
+    approvalTxHash?: string;
+  };
+  receipt?: X402Receipt;
+  error?: string;
+};
+
+type X402UnlockState =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'paying'; requiredProof: X402RequiredProof | null }
+  | { status: 'unlocked'; requiredProof?: X402RequiredProof | null; unlock?: DemoUnlockPayload }
+  | { status: 'failed'; requiredProof?: X402RequiredProof | null; error?: string }
+  | { status: 'disabled' };
+
 function X402Panel({
   x402,
-  unlockStatus,
+  unlockState,
   onUnlock,
 }: {
   x402: PipelineRun['x402'];
-  unlockStatus: 'idle' | 'required' | 'failed' | 'disabled';
+  unlockState: X402UnlockState;
   onUnlock: () => void;
 }) {
   if (!x402 || x402.status === 'disabled') {
@@ -310,16 +383,71 @@ function X402Panel({
 
   return (
     <ProofPanel title="x402 Intelligence API">
-      <p className="text-sm font-semibold text-[#292824]">Status: {x402.status}</p>
-      <p className="mt-2 break-all text-sm leading-6 text-[#625F57]">{x402.intelligenceUrl}</p>
-      {x402.priceUsdcMicro && (
-        <p className="mt-1 text-sm text-[#625F57]">Price: {x402.priceUsdcMicro} micro-USDC on ARC-TESTNET</p>
-      )}
-      <button type="button" onClick={onUnlock} className="secondary-button pressable mt-3 px-4">
-        Test unlock
+      <div className="flex items-start gap-2">
+        <LockKeyhole aria-hidden="true" className="mt-0.5 shrink-0 text-[#8C3D32]" size={16} />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[#292824]">Payment required until the buyer agent signs.</p>
+          <p className="mt-1 break-all text-sm leading-6 text-[#625F57]">{x402.intelligenceUrl}</p>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 text-sm text-[#625F57]">
+        <X402Fact label="Price" value={`${formatMicroUsdc(x402.priceUsdcMicro)} USDC (${x402.priceUsdcMicro ?? 0} micro-USDC)`} />
+        <X402Fact label="Seller" value={x402.payToAddress ?? 'No seller wallet configured'} />
+        <X402Fact label="Gateway" value={x402.gatewayUrl ?? x402.facilitatorUrl ?? 'Circle Gateway testnet'} />
+        <X402Fact label="Network" value={x402.network ?? 'Arc Testnet'} />
+      </div>
+      <button
+        type="button"
+        onClick={onUnlock}
+        disabled={unlockState.status === 'checking' || unlockState.status === 'paying'}
+        className="secondary-button pressable mt-3 px-4 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span className="inline-flex items-center justify-center gap-2">
+          {unlockState.status === 'checking' || unlockState.status === 'paying'
+            ? <LoaderCircle aria-hidden="true" className="animate-spin" size={15} />
+            : <WalletCards aria-hidden="true" size={15} />}
+          Pay with buyer agent
+        </span>
       </button>
-      {unlockStatus !== 'idle' && <p className="mt-2 text-sm font-medium text-[#8C3D32]">Unlock result: {unlockStatus}</p>}
+      {unlockState.status === 'checking' && <p className="mt-2 text-sm font-medium text-[#625F57]">Checking unpaid endpoint for a 402 challenge...</p>}
+      {unlockState.status === 'paying' && (
+        <div className="mt-3 rounded border border-[#E5E1D8] bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8C3D32]">402 Required Proof</p>
+          <p className="mt-2 text-sm leading-6 text-[#625F57]">
+            The intelligence endpoint returned Payment Required. The buyer agent is signing and settling through Circle Gateway.
+          </p>
+        </div>
+      )}
+      {unlockState.status === 'unlocked' && (
+        <div className="mt-3 rounded border border-[#CFC8BA] bg-white p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-[#292824]">
+            <ReceiptText aria-hidden="true" size={15} />
+            Paid receipt
+          </div>
+          <div className="mt-2 grid gap-2 text-sm text-[#625F57]">
+            <X402Fact label="Buyer" value={unlockState.unlock?.buyer ?? unlockState.unlock?.receipt?.payer ?? 'Buyer address unavailable'} />
+            <X402Fact label="Settlement" value={unlockState.unlock?.receipt?.settlementTransaction ?? 'Settlement accepted by Gateway'} />
+            {unlockState.unlock?.deposit && (
+              <X402Fact label="Deposit" value={`${unlockState.unlock.deposit.amountUsdc} USDC / ${unlockState.unlock.deposit.depositTxHash}`} />
+            )}
+          </div>
+        </div>
+      )}
+      {unlockState.status === 'failed' && (
+        <p className="mt-2 text-sm font-medium text-[#8C3D32]">
+          Buyer-agent unlock failed{unlockState.error ? `: ${unlockState.error}` : '.'}
+        </p>
+      )}
     </ProofPanel>
+  );
+}
+
+function X402Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1 sm:grid-cols-[5.5rem_1fr]">
+      <span className="font-medium text-[#77746B]">{label}</span>
+      <span className="min-w-0 break-all text-[#292824]">{value}</span>
+    </div>
   );
 }
 
@@ -334,6 +462,70 @@ function ProofPanel({ title, children }: { title: string; children: ReactNode })
 
 function FlowStep({ label }: { label: string }) {
   return <div className="rounded border border-[#E5E1D8] bg-white px-3 py-2 text-center">{label}</div>;
+}
+
+function ArtifactComparison({ pipelineRun }: { pipelineRun: PipelineRun }) {
+  const ingestion = pipelineRun.ingestion;
+  const market = pipelineRun.acceptedMarket;
+  const rejectedCount = getRejectedMarkets(pipelineRun).length;
+  const artifactItems = [
+    ingestion ? `${ingestion.language} source, ${ingestion.sourceDate}, ${ingestion.region}` : 'Source metadata unavailable',
+    ingestion ? `Actors: ${ingestion.entities.filter((entity) => entity !== ingestion.region).join(', ') || 'Not provided'}` : 'Actors unavailable',
+    market ? `Accepted resolver: ${market.resolutionSource}` : 'Resolver unavailable',
+    market ? `Accepted deadline: ${market.deadline}` : 'Deadline unavailable',
+    `${rejectedCount} rejected alternatives with reasons`,
+    `Trace status: ${describeTraceForMemo(pipelineRun.trace)}`,
+  ];
+
+  return (
+    <section className="rounded-md border border-[#D8D3C8] bg-white p-4">
+      <div className="eyebrow">Naive output vs AgoraBabel artifact</div>
+      <div className="mt-4 grid gap-3 md:grid-cols-[0.85fr_1.15fr] md:items-start">
+        <div className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#77746B]">Naive output</div>
+          <p className="mt-2 text-base font-semibold leading-7 text-[#292824]">{getNaiveQuestion(pipelineRun)}</p>
+        </div>
+        <div className="rounded-md border border-[#CFC8BA] bg-white p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#171717]">AgoraBabel artifact</div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {artifactItems.map((item) => (
+              <div key={item} className="flex min-w-0 gap-2 text-sm leading-6 text-[#625F57]">
+                <Check aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-[#526247]" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      {isChileCeolRun(pipelineRun) && (
+        <p className="mt-3 text-sm font-medium leading-6 text-[#625F57]">
+          AgoraBabel separates "terms agreed" from "ratification still pending" and resolves only on official government or Contraloria publication.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function getNaiveQuestion(run: PipelineRun): string {
+  if (isChileCeolRun(run)) {
+    return 'Will Chile approve the Laguna Verde lithium deal by June 30, 2026?';
+  }
+
+  const deadline = run.acceptedMarket?.deadline ?? 'the deadline';
+  const topic = run.ingestion?.topic.toLowerCase() ?? 'the reported event';
+
+  return `Will ${topic} happen by ${deadline}?`;
+}
+
+function isChileCeolRun(run: PipelineRun): boolean {
+  const text = [
+    run.sourceInput,
+    run.ingestion?.signalName,
+    run.ingestion?.topic,
+    run.acceptedMarket?.question,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return text.includes('ceol') || text.includes('laguna verde') || text.includes('contraloria');
 }
 
 function getRejectedMarkets(pipelineRun: PipelineRun) {
@@ -451,6 +643,13 @@ function describeTraceForMemo(trace: PipelineRun['trace']) {
   }
 
   return `Local trace prepared from structured outputs; no Arc transaction or x402 proof is attached. Trace hash ${trace.traceHash}.`;
+}
+
+function formatMicroUsdc(value: number | null | undefined) {
+  if (!value || value <= 0) return '0';
+  const whole = Math.floor(value / 1_000_000);
+  const fraction = String(value % 1_000_000).padStart(6, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : String(whole);
 }
 
 function formatRejectedReason(rule: string) {

@@ -1,9 +1,9 @@
 export const sampleArticle = {
-  id: 'turkey-emergency-rate-intervention-2026',
-  title: 'Turkey emergency central-bank intervention',
-  sourceDate: 'Not provided',
+  id: 'chile-laguna-verde-ceol-ratification-2026',
+  title: 'Chile Laguna Verde CEOL ratification',
+  sourceDate: '2026-05-18',
   sourceText:
-    'Dunya reports that Turkiye Cumhuriyet Merkez Bankasi officials are preparing an emergency liquidity and policy-rate intervention before 2026-06-15 after renewed pressure on the lira. Merkez Bankasi kaynaklari, karar metninin haftalik PPK toplantisi disinda yayimlanabilecegini ve duyurunun resmi TCMB sayfasindan yapilacagini belirtti. The official resolver page named in the report is the TCMB website at https://www.tcmb.gov.tr/.',
+    'Diario Financiero Chile informa que el Ministerio de Mineria y Minera Laguna Verde acordaron los terminos de un CEOL para explotar litio en la zona de Laguna Verde, pero la ratificacion oficial del Gobierno y la toma de razon de Contraloria siguen pendientes. Funcionarios indicaron que el acuerdo podria publicarse antes del 2026-06-30 si se completa la revision administrativa. La fuente oficial de resolucion seria una publicacion del Gobierno de Chile o de la Contraloria General de la Republica en https://www.contraloria.cl/.',
 } as const;
 
 export const sampleArticles = [
