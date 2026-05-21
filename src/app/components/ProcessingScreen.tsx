@@ -416,22 +416,6 @@ function ProgressRail({
 
   return (
     <nav aria-label="Workflow progress" className="relative overflow-visible">
-      {selectedStep && (
-        <div className="mb-3 grid min-h-[4.75rem] gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-[#77746B]">
-                Step {selectedIndex + 1} of {steps.length}
-              </span>
-              <span className={`rounded-sm border px-2 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${progressStatusClassName(selectedStep.status)}`}>
-                {progressStatusLabel(selectedStep.status)}
-              </span>
-            </div>
-            <div className="mt-1 truncate text-base font-semibold leading-6 text-[#171717]">{selectedStep.label}</div>
-            <p className="mt-0.5 line-clamp-2 max-w-3xl text-sm leading-5 text-[#625F57]">{selectedStep.description}</p>
-          </div>
-        </div>
-      )}
       <div className="-mx-6 overflow-x-auto px-6 py-1 sm:-mx-8 sm:px-8 lg:-mx-10 lg:px-10">
         <ol className="flex min-w-max items-center gap-0 sm:min-w-0">
           {steps.map((step, index) => {
@@ -477,6 +461,22 @@ function ProgressRail({
           })}
         </ol>
       </div>
+      {selectedStep && (
+        <div className="mt-3 grid min-h-[4.75rem] gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-[#77746B]">
+                Step {selectedIndex + 1} of {steps.length}
+              </span>
+              <span className={`rounded-sm border px-2 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${progressStatusClassName(selectedStep.status)}`}>
+                {progressStatusLabel(selectedStep.status)}
+              </span>
+            </div>
+            <div className="mt-1 truncate text-base font-semibold leading-6 text-[#171717]">{selectedStep.label}</div>
+            <p className="mt-0.5 line-clamp-2 max-w-3xl text-sm leading-5 text-[#625F57]">{selectedStep.description}</p>
+          </div>
+        </div>
+      )}
       {tooltip && tooltipStep && (
         <span
           role="tooltip"
