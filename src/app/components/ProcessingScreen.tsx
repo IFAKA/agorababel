@@ -19,8 +19,6 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   clamp,
-  formatOperationStatusLabel,
-  formatOperationMetadataKey,
   getCompactOperationDwellMs,
   getCompactOperationsReadableText,
   getOneStepPresentationTarget,
@@ -893,7 +891,6 @@ function PipelineArtifact({
       contentKey={view.key}
       transitionDirection={transitionDirection}
       reduceMotion={Boolean(reduceMotion)}
-      operations={view.step ? pipelineRun.stepOperations[view.step.id] ?? [] : []}
     >
       {view.body}
     </StepArtifactFrame>
@@ -1432,7 +1429,6 @@ function StepArtifactFrame({
   transitionDirection = 0,
   reduceMotion = false,
   className = '',
-  operations = [],
 }: {
   step?: PipelineStep;
   eyebrow: string;
@@ -1446,7 +1442,6 @@ function StepArtifactFrame({
   transitionDirection?: StepTransitionDirection;
   reduceMotion?: boolean;
   className?: string;
-  operations?: OperationEvent[];
 }) {
   return (
     <motion.section
@@ -1482,7 +1477,6 @@ function StepArtifactFrame({
               </div>
               {description && <p className="mt-5 max-w-2xl text-lg leading-8 text-[#625F57]">{description}</p>}
               {children}
-              {step && <OperationTimeline operations={operations} stepStatus={step.status} />}
             </div>
             {footer && <div className="border-t border-[#E5E1D8] bg-[#FBFAF7] p-8 sm:p-10">{footer}</div>}
             {step && (
@@ -1570,121 +1564,10 @@ function ResolverDiscoveryPanel({
   );
 }
 
-function OperationTimeline({
-  operations,
-  stepStatus,
-}: {
-  operations: OperationEvent[];
-  stepStatus: PipelineStepStatus;
-}) {
-  const rows = (operations.length > 0
-    ? operations
-    : [{
-        id: 'operation-waiting',
-        label: 'Preparing execution update',
-        status: stepStatus === 'failed' ? 'failed' : stepStatus === 'complete' ? 'complete' : 'pending',
-        detail: 'Execution details will appear as this stage reports progress.',
-        timestamp: new Date().toISOString(),
-        simulated: false,
-      } satisfies OperationEvent]).map((operation) => normalizeOperationForStep(operation, stepStatus));
-
-  return (
-    <StepReveal index={4} className="mt-8 border-t border-[#E5E1D8] pt-6">
-      <div className="grid gap-2">
-        {rows.map((operation, index) => (
-          <StepReveal key={operation.id} index={index}>
-            <OperationRow operation={operation} />
-          </StepReveal>
-        ))}
-      </div>
-    </StepReveal>
-  );
-}
-
-function normalizeOperationForStep(operation: OperationEvent, stepStatus: PipelineStepStatus): OperationEvent {
-  if (stepStatus === 'complete' && operation.status !== 'failed') {
-    return { ...operation, status: 'complete' };
-  }
-
-  if (stepStatus === 'failed' && operation.status !== 'complete') {
-    return { ...operation, status: 'failed' };
-  }
-
-  return operation;
-}
-
-function OperationRow({
-  operation,
-}: {
-  operation: OperationEvent;
-}) {
-  const metadata = getDisplayMetadata(operation.metadata);
-  const label = sanitizeOperationText(operation.label);
-  const collapsedMetadata = metadata.slice(0, 2);
-
-  return (
-    <div className="grid gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 sm:grid-cols-[auto_minmax(0,1fr)]">
-      <div className="flex items-start gap-3">
-        <OperationStatusIcon status={operation.status} />
-        <time className="mt-0.5 shrink-0 text-xs font-semibold tabular-nums text-[#9D998E]" dateTime={operation.timestamp}>
-          {formatOperationTime(operation.timestamp)}
-        </time>
-      </div>
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-semibold leading-6 text-[#292824]">{label}</h3>
-          <span className={`rounded-sm border px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${operationStatusClassName(operation.status)}`}>
-            {operationStatusLabel(operation.status)}
-          </span>
-          {collapsedMetadata.map(([key, value]) => (
-            <span key={`${operation.id}-compact-${key}`} className="min-w-0 rounded-sm border border-[#E5E1D8] bg-white px-2 py-0.5 text-xs font-medium leading-5 text-[#625F57] [overflow-wrap:anywhere]">
-              <span className="text-[#9D998E]">{formatMetadataKey(key)}:</span> {value}
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function OperationStatusIcon({ status }: { status: OperationEvent['status'] }) {
-  const state: StepState = status === 'complete'
-    ? 'complete'
-    : status === 'failed'
-      ? 'failed'
-      : status === 'running'
-        ? 'active'
-        : 'pending';
-
-  return <StepMark state={state} compact />;
-}
-
-function operationStatusLabel(status: OperationEvent['status']): string {
-  return formatOperationStatusLabel(status);
-}
-
-function operationStatusClassName(status: OperationEvent['status']): string {
-  if (status === 'complete') return 'border-[#CFC8BA] bg-white text-[#292824]';
-  if (status === 'running') return 'border-[#CFC8BA] bg-[#F7F6F1] text-[#292824]';
-  if (status === 'failed') return 'border-[#C58778] bg-[#FFF9F5] text-[#8C3D32]';
-  return 'border-[#E5E1D8] bg-white text-[#77746B]';
-}
-
 function formatOperationTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '--:--:--';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function formatMetadataKey(value: string): string {
-  return formatOperationMetadataKey(value);
-}
-
-function getDisplayMetadata(metadata?: Record<string, string>): [string, string][] {
-  return Object.entries(metadata ?? {})
-    .filter(([key]) => key !== 'mode')
-    .map(([key, value]) => [key, sanitizeOperationText(value)] as [string, string])
-    .filter(([, value]) => value.trim().length > 0);
 }
 
 function sanitizeOperationText(value: string): string {
