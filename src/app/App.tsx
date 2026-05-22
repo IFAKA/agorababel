@@ -4,7 +4,6 @@ import { LandingScreen } from './components/LandingScreen';
 import { ProcessingScreen, type SubmissionHistoryItem } from './components/ProcessingScreen';
 import { MarketScreen } from './components/MarketScreen';
 import { AgoraBabelTraceMark } from './components/AgoraBabelTraceMark';
-import { ThemeModeControl } from './components/shared/ThemeModeControl';
 import { sampleArticle } from './sampleArticleData';
 import { useThemeMode } from './themeMode';
 import { DEFAULT_MARKET_SLUG, getMarketPath, getMarketSlugFromPath, getPipelineRunSlug, hydratePipelineRunForSlug, persistCompletedPipelineRun } from './pipeline/artifactStorage';
@@ -415,6 +414,8 @@ export default function App() {
                       introActive={showSplash}
                       onAnalyzeSource={handleNewAnalysis}
                       onRunSampleArticle={handleRunSampleArticle}
+                      themeMode={themeMode.mode}
+                      onThemeModeChange={themeMode.setMode}
                     />
                   )}
                   {currentScreen === 'create' && (
@@ -438,7 +439,6 @@ export default function App() {
           <AnimatePresence>
             {showSplash && <SplashScreen settling={splashSettling} />}
           </AnimatePresence>
-          <ThemeModeControl mode={themeMode.mode} onChange={themeMode.setMode} />
         </div>
       </LayoutGroup>
     </MotionConfig>

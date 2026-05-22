@@ -82,27 +82,27 @@
 }
 
 .dark {
-  --background: #080D12;
-  --foreground: #EEF3ED;
-  --card: #101920;
-  --card-foreground: #EEF3ED;
-  --popover: #101920;
-  --popover-foreground: #EEF3ED;
-  --primary: #D9FF72;
-  --primary-foreground: #091012;
-  --secondary: #16232B;
-  --secondary-foreground: #DCE8DF;
-  --muted: #132029;
-  --muted-foreground: #93A59B;
-  --accent: #7DE3D1;
-  --accent-foreground: #061010;
-  --destructive: #FF8E7C;
-  --destructive-foreground: #1A0806;
-  --border: #24333B;
-  --input: #111D25;
-  --input-background: #111D25;
-  --switch-background: #2E3F47;
-  --ring: #D9FF72;
+  --background: #10100E;
+  --foreground: #F4F1EA;
+  --card: #191815;
+  --card-foreground: #F4F1EA;
+  --popover: #191815;
+  --popover-foreground: #F4F1EA;
+  --primary: #F4F1EA;
+  --primary-foreground: #171411;
+  --secondary: #24211D;
+  --secondary-foreground: #EFE9DC;
+  --muted: #24211D;
+  --muted-foreground: #B9B1A3;
+  --accent: #CFA36A;
+  --accent-foreground: #171411;
+  --destructive: #F1A092;
+  --destructive-foreground: #20100C;
+  --border: #363129;
+  --input: #1D1B17;
+  --input-background: #1D1B17;
+  --switch-background: #403A31;
+  --ring: #D6B178;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --chart-1: oklch(0.488 0.243 264.376);
@@ -110,50 +110,50 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
-  --text-primary: #EEF3ED;
-  --text-secondary: #B8C8C0;
-  --text-muted: #8EA098;
-  --text-warm: #C1D0C8;
-  --surface: #101920;
-  --elevated: #16232B;
-  --archive-texture: rgba(125, 227, 209, 0.055);
-  --surface-0: #080D12;
-  --surface-1: #0B1319;
-  --surface-2: #101920;
-  --surface-3: #16232B;
-  --line-soft: #24333B;
-  --line-strong: #3A5058;
-  --line-muted: #1B2A32;
-  --text-strong: #F7FFF6;
-  --text-body: #DCE8DF;
-  --text-subtle: #8EA098;
-  --text-link: #82E6DA;
-  --success: #A8D77B;
-  --warning: #F3C96F;
-  --danger: #FF8E7C;
-  --shadow-soft: rgba(0, 0, 0, 0.58);
-  --gold: #D9FF72;
-  --green: #A8D77B;
-  --cyan: #82E6DA;
-  --surface-glow: rgba(125, 227, 209, 0.08);
-  --surface-glint: rgba(217, 255, 114, 0.12);
-  --surface-inset: rgba(0, 0, 0, 0.24);
-  --surface-raised: #14212A;
-  --surface-sunken: #0B1319;
-  --surface-selected: #152918;
-  --surface-danger: #291612;
-  --line-danger: #5C3029;
-  --text-danger-strong: #FFAD9D;
-  --text-success-strong: #BDEB91;
-  --text-disabled: #64736E;
+  --sidebar: #191815;
+  --sidebar-foreground: #EFE9DC;
+  --sidebar-primary: #CFA36A;
+  --sidebar-primary-foreground: #171411;
+  --sidebar-accent: #24211D;
+  --sidebar-accent-foreground: #EFE9DC;
+  --sidebar-border: #363129;
+  --sidebar-ring: #D6B178;
+  --text-primary: #F4F1EA;
+  --text-secondary: #D7D0C3;
+  --text-muted: #A8A094;
+  --text-warm: #D1C7B8;
+  --surface: #191815;
+  --elevated: #24211D;
+  --archive-texture: rgba(244, 241, 234, 0.035);
+  --surface-0: #10100E;
+  --surface-1: #141310;
+  --surface-2: #191815;
+  --surface-3: #24211D;
+  --line-soft: #363129;
+  --line-strong: #5A5144;
+  --line-muted: #2B2721;
+  --text-strong: #FFFDF7;
+  --text-body: #EFE9DC;
+  --text-subtle: #B9B1A3;
+  --text-link: #9FC7D1;
+  --success: #A8C184;
+  --warning: #D6B178;
+  --danger: #F1A092;
+  --shadow-soft: rgba(0, 0, 0, 0.52);
+  --gold: #D6B178;
+  --green: #A8C184;
+  --cyan: #9FC7D1;
+  --surface-glow: rgba(244, 241, 234, 0.055);
+  --surface-glint: rgba(244, 241, 234, 0.09);
+  --surface-inset: rgba(0, 0, 0, 0.22);
+  --surface-raised: #211F1A;
+  --surface-sunken: #141310;
+  --surface-selected: #1F281B;
+  --surface-danger: #2B1712;
+  --line-danger: #6B3830;
+  --text-danger-strong: #FFC0B4;
+  --text-success-strong: #C4D9A7;
+  --text-disabled: #80786C;
 }
 
 @theme inline {
@@ -773,7 +773,9 @@
   .dark [class*="bg-[#FBFAF7]"],
   .dark [class*="bg-[#EFEAE0]"],
   .dark [class*="bg-[#F2F7EE]"],
-  .dark [class*="bg-[#F7F8F4]"] {
+  .dark [class*="bg-[#F7F8F4]"],
+  .dark [class*="bg-[#E8E4DA]"],
+  .dark [class*="bg-[#DDD8CE]"] {
     background-color: var(--surface-3) !important;
   }
 
@@ -792,11 +794,12 @@
   .dark [class*="bg-[#252521]"],
   .dark [class*="group-hover:bg-[#191A1C]"]:hover,
   .dark .group:hover [class*="group-hover:bg-[#191A1C]"] {
-    background-color: var(--primary) !important;
+    background-color: #11100E !important;
   }
 
   .dark [class*="bg-[#526247]"],
-  .dark [class*="bg-[#6D826E]"] {
+  .dark [class*="bg-[#6D826E]"],
+  .dark [class*="bg-[#BFD0B3]"] {
     background-color: var(--success) !important;
   }
 
@@ -809,6 +812,9 @@
   .dark [class*="border-[#D8D1C3]"],
   .dark [class*="border-[#CFC8BA]"],
   .dark [class*="border-[#CFC8BB]"],
+  .dark [class*="border-[#DEDBD2]"],
+  .dark [class*="border-[#DCD7CC]"],
+  .dark [class*="border-[#BFD0B3]"],
   .dark [class*="border-[#E0DCD2]"],
   .dark [class*="hover:border-[#E4E0D7]"]:hover {
     border-color: var(--line-soft) !important;
@@ -827,7 +833,9 @@
 
   .dark [class*="text-[#171717]"],
   .dark [class*="text-[#191A1C]"],
+  .dark [class*="text-[#242424]"],
   .dark [class*="text-[#252521]"],
+  .dark [class*="text-[#2D2C28]"],
   .dark [class*="text-[#292824]"],
   .dark [class*="text-[#343330]"] {
     color: var(--text-strong) !important;
@@ -836,6 +844,7 @@
   .dark [class*="text-[#3E2723]"],
   .dark [class*="text-[#4C332C]"],
   .dark [class*="text-[#4D4A43]"],
+  .dark [class*="text-[#5F5C53]"],
   .dark [class*="text-[#55534D]"],
   .dark [class*="text-[#625F57]"],
   .dark [class*="text-[#6B6962]"],
@@ -870,7 +879,7 @@
   .dark [class~="text-white"],
   .dark [class*="group-hover:text-white"],
   .dark .group:hover [class*="group-hover:text-white"] {
-    color: var(--primary-foreground) !important;
+    color: var(--text-strong) !important;
   }
 
   .dark [class*="from-[#171717]"],

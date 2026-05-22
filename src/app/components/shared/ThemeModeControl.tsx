@@ -7,6 +7,12 @@ const options = [
   { mode: 'system', label: 'System', icon: Monitor },
 ] as const;
 
+const nextModeByMode: Record<ThemeMode, ThemeMode> = {
+  light: 'dark',
+  dark: 'system',
+  system: 'light',
+};
+
 export function ThemeModeControl({
   mode,
   onChange,
@@ -14,29 +20,21 @@ export function ThemeModeControl({
   mode: ThemeMode;
   onChange: (mode: ThemeMode) => void;
 }) {
-  return (
-    <div
-      className="pointer-events-auto fixed right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-40 inline-flex rounded-md border border-[var(--line-soft)] bg-[var(--surface-2)] p-1 shadow-[0_12px_32px_var(--shadow-soft)]"
-      role="group"
-      aria-label="Theme mode"
-    >
-      {options.map(({ mode: optionMode, label, icon: Icon }) => {
-        const active = mode === optionMode;
+  const activeOption = options.find((option) => option.mode === mode) ?? options[2];
+  const Icon = activeOption.icon;
+  const nextMode = nextModeByMode[mode];
+  const nextLabel = options.find((option) => option.mode === nextMode)?.label ?? 'Light';
 
-        return (
-          <button
-            key={optionMode}
-            type="button"
-            className={`pressable grid size-9 place-items-center rounded-[5px] ${active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--text-subtle)] hover:bg-[var(--surface-3)] hover:text-[var(--text-strong)]'}`}
-            aria-label={`${label} theme`}
-            aria-pressed={active}
-            title={`${label} theme`}
-            onClick={() => onChange(optionMode)}
-          >
-            <Icon aria-hidden="true" size={15} />
-          </button>
-        );
-      })}
-    </div>
+  return (
+    <button
+      type="button"
+      className="secondary-button pressable inline-flex min-h-10 items-center justify-center gap-2 px-3 text-sm"
+      aria-label={`Theme mode: ${activeOption.label}. Switch to ${nextLabel}.`}
+      title={`Theme: ${activeOption.label}. Click for ${nextLabel}.`}
+      onClick={() => onChange(nextMode)}
+    >
+      <Icon aria-hidden="true" size={15} />
+      <span className="hidden sm:inline">{activeOption.label}</span>
+    </button>
   );
 }

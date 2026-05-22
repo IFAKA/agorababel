@@ -3,6 +3,8 @@ import { ArrowRight, Check, Clock3, FileText, Github, Globe2, LoaderCircle, Paus
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'motion/react';
 import { AgoraBabelTraceMark } from '../AgoraBabelTraceMark';
 import { pageContainerClassName } from '../pageLayout';
+import { ThemeModeControl } from '../shared/ThemeModeControl';
+import type { ThemeMode } from '../../themeMode';
 
 const workflow = ['Read Source', 'Explain Context', 'Quality Check', 'Save Proof'];
 const repositoryUrl = 'https://github.com/IFAKA/agorababel';
@@ -84,10 +86,14 @@ export function LandingScreen({
   introActive = false,
   onAnalyzeSource,
   onRunSampleArticle,
+  themeMode,
+  onThemeModeChange,
 }: {
   introActive?: boolean;
   onAnalyzeSource: () => void;
   onRunSampleArticle: () => void;
+  themeMode: ThemeMode;
+  onThemeModeChange: (mode: ThemeMode) => void;
 }) {
   const reduceMotion = useReducedMotion();
 
@@ -118,16 +124,19 @@ export function LandingScreen({
                 AgoraBabel
               </motion.div>
             </div>
-            <a
-              href={repositoryUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="secondary-button pressable inline-flex min-h-10 items-center justify-center gap-2 px-3 text-sm"
-            >
-              <Github aria-hidden="true" size={15} />
-              <span className="hidden sm:inline">Star repo</span>
-              <Star aria-hidden="true" className="sm:hidden" size={14} />
-            </a>
+            <div className="flex items-center gap-2">
+              <ThemeModeControl mode={themeMode} onChange={onThemeModeChange} />
+              <a
+                href={repositoryUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="secondary-button pressable inline-flex min-h-10 items-center justify-center gap-2 px-3 text-sm"
+              >
+                <Github aria-hidden="true" size={15} />
+                <span className="hidden sm:inline">Star repo</span>
+                <Star aria-hidden="true" className="sm:hidden" size={14} />
+              </a>
+            </div>
           </motion.header>
 
           <motion.section
