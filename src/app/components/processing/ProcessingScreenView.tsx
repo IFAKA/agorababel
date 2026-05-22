@@ -13,6 +13,7 @@ import {
   Play,
   RotateCcw,
   ShieldCheck,
+  Wallet,
   X,
 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -131,8 +132,14 @@ export function ProcessingScreen({
   const hasStarted = runId > 0;
   const showSourceAccepted = hasStarted && !sourceAcceptedHandoffComplete;
   const presentedSteps = useMemo(
-    () => createPresentedSteps(pipelineRun.steps, hasStarted && !showSourceAccepted ? presentedStep : { index: 0, status: 'pending', since: presentedStep.since }),
-    [hasStarted, pipelineRun.steps, presentedStep, showSourceAccepted],
+    () => {
+      if (hasStarted && !showSourceAccepted && (pipelineRun.status === 'complete' || pipelineRun.status === 'trace-committed')) {
+        return pipelineRun.steps.map((step) => ({ ...step, status: 'complete' as const }));
+      }
+
+      return createPresentedSteps(pipelineRun.steps, hasStarted && !showSourceAccepted ? presentedStep : { index: 0, status: 'pending', since: presentedStep.since });
+    },
+    [hasStarted, pipelineRun.status, pipelineRun.steps, presentedStep, showSourceAccepted],
   );
   const runningStep = presentedSteps.find((step) => step.status === 'running' || step.status === 'failed');
   const activeStep = runningStep ?? [...presentedSteps].reverse().find((step) => step.status === 'complete') ?? presentedSteps[0];
@@ -885,11 +892,11 @@ function PipelineArtifact({
       reduceMotion={Boolean(reduceMotion)}
     >
       {view.body}
-      {isComplete && view.key !== 'settlement' && view.key !== 'x402' && (
+      {isComplete && view.key !== 'x402' && (
         <StepReveal className="mt-8 border-t border-[#E5E1D8] pt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="eyebrow">Validated artifact</div>
+              <div className="eyebrow">Completed run</div>
               {pipelineRun.analyzedInMs !== undefined && <Runtime runtimeMs={pipelineRun.analyzedInMs} />}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -913,20 +920,6 @@ function PipelineArtifact({
               </button>
             </div>
           </div>
-          {pipelineRun.acceptedMarket && (
-            <div className="mt-6 grid gap-5 sm:grid-cols-2">
-              <Criteria label="YES" value={pipelineRun.acceptedMarket.yesCriteria} />
-              <Criteria label="NO" value={pipelineRun.acceptedMarket.noCriteria} />
-              <div className="sm:col-span-2">
-                <ComparisonMoment pipelineRun={pipelineRun} />
-              </div>
-              {!isCommittedTrace(pipelineRun.trace) && (
-                <p className="text-sm font-medium leading-6 text-[#77746B] sm:col-span-2">
-                  Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
-                </p>
-              )}
-            </div>
-          )}
         </StepReveal>
       )}
     </StepArtifactFrame>
@@ -1131,20 +1124,30 @@ function getArtifactView({
         key: activeStep.id,
         step: activeStep,
         eyebrow: 'Find Main Claim',
-        title: ingestion.signalName,
-        description: `Main claim found: ${context.relevanceExplanation}`,
+        title: pipelineRun.analysis?.claim.summary ?? getNormalizedClaim(ingestion),
+        description: 'The claim is reduced to the event, supporting evidence, and deadline the market can resolve against.',
         icon: <Languages aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
-            <StepReveal>
-              <ArtifactField label="Region and event" value={`${ingestion.region} / ${ingestion.topic}`} />
-            </StepReveal>
-            <StepReveal index={1}>
-              <ArtifactField label="Actors" value={getActors(ingestion.entities)} />
-            </StepReveal>
-            <StepReveal index={2} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
-              <div className="eyebrow">Validated evidence</div>
-              <p className="mt-3 text-base leading-7 text-[#292824]">{context.evidenceSummary}</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <StepReveal>
+                <ArtifactField label="Claim" value={pipelineRun.analysis?.claim.summary ?? getNormalizedClaim(ingestion)} />
+              </StepReveal>
+              <StepReveal index={1}>
+                <ArtifactField label="Deadline" value={pipelineRun.analysis?.claim.deadline ?? pipelineRun.candidateMarkets[0]?.deadline ?? 'Deadline pending'} />
+              </StepReveal>
+              <StepReveal index={2}>
+                <ArtifactField label="Actors" value={(pipelineRun.analysis?.claim.actors ?? ingestion.entities).join(', ') || getActors(ingestion.entities)} />
+              </StepReveal>
+              <StepReveal index={3}>
+                <ArtifactField label="Event type" value={pipelineRun.analysis?.claim.eventType ?? ingestion.topic} />
+              </StepReveal>
+            </div>
+            <StepReveal index={4} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+              <div className="eyebrow">Evidence</div>
+              <p className="mt-3 text-base leading-7 text-[#292824]">
+                {pipelineRun.analysis?.claim.evidence.map((item) => `${item.text} (${item.source})`).join(' ') ?? context.evidenceSummary}
+              </p>
             </StepReveal>
           </div>
         ),
@@ -1301,9 +1304,6 @@ function getArtifactView({
                 </div>
               </div>
             </StepReveal>
-            <StepReveal index={3} className="sm:col-span-2">
-              <ComparisonMoment pipelineRun={pipelineRun} />
-            </StepReveal>
           </div>
         ),
       };
@@ -1352,30 +1352,140 @@ function getArtifactView({
       };
     }
 
-    case 'settlement':
-    case 'x402': {
+    case 'circle': {
+      const wallet = pipelineRun.circleAgentWallet;
+
+      if (!wallet) {
+        return createPendingArtifactView(activeStep, 'Circle wallet status is being checked.');
+      }
+
+      const isReady = wallet.status === 'ready';
+
+      return {
+        key: activeStep.id,
+        step: activeStep,
+        eyebrow: 'Check Wallet',
+        title: isReady ? 'Circle wallet is ready for proof attachment.' : 'Circle wallet is not ready.',
+        description: isReady
+          ? 'The proof step can use this configured Arc Testnet wallet.'
+          : wallet.error ?? 'Wallet configuration must be ready before a chain proof can be attached.',
+        icon: <Wallet aria-hidden="true" size={18} />,
+        body: (
+          <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6">
+            <StepReveal className={`rounded-md border p-4 ${isReady ? 'border-[#BFD0B3] bg-[#F2F7EE]' : 'border-[#E0C5BC] bg-[#FFF9F5]'}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="eyebrow">Wallet readiness</div>
+                  <p className="mt-2 text-xl font-semibold capitalize leading-7 text-[#292824]">{wallet.status}</p>
+                </div>
+                <span className={`rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] ${
+                  isReady ? 'border-[#BFD0B3] bg-white text-[#2E5B2D]' : 'border-[#C58778] bg-white text-[#8C3D32]'
+                }`}>
+                  {isReady ? 'Ready' : 'Blocked'}
+                </span>
+              </div>
+              {wallet.error && <p className="mt-3 text-sm font-medium leading-6 text-[#8C3D32]">{wallet.error}</p>}
+            </StepReveal>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <StepReveal index={1}>
+                <ArtifactField label="Wallet ID" value={wallet.walletId ?? 'Missing'} />
+              </StepReveal>
+              <StepReveal index={2}>
+                <ArtifactField label="Wallet set" value={wallet.walletSetId ?? 'Missing'} />
+              </StepReveal>
+              <StepReveal index={3} className="sm:col-span-2">
+                <ArtifactField label="Address" value={wallet.address ?? 'No address configured'} />
+              </StepReveal>
+              <StepReveal index={4}>
+                <ArtifactField label="Blockchain" value={wallet.blockchain} />
+              </StepReveal>
+              <StepReveal index={5}>
+                <ArtifactField label="Checked at" value={wallet.checkedAt} />
+              </StepReveal>
+            </div>
+          </div>
+        ),
+      };
+    }
+
+    case 'settlement': {
       const market = pipelineRun.acceptedMarket;
       const traceCommitted = isCommittedTrace(pipelineRun.trace);
 
       if (!market) {
-        return createPendingArtifactView(activeStep, 'Proof and publication are waiting for an approved market.');
+        return createPendingArtifactView(activeStep, 'Saving proof is waiting for an approved market.');
       }
 
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: activeStep.id === 'x402'
-          ? pipelineRun.x402?.status === 'disabled' || !pipelineRun.x402 ? 'Paid Access Disabled' : 'Publish Access'
-          : traceCommitted ? 'Proof Saved' : 'Proof Prepared',
-        title: market.question,
+        eyebrow: traceCommitted ? 'Proof Saved' : 'Proof Prepared',
+        title: traceCommitted ? 'Arc proof saved.' : 'Proof prepared for review.',
         description: traceCommitted
-          ? 'A permanent Arc Testnet proof now points to this final market artifact.'
-          : 'The source and market proof are prepared for review.',
+          ? 'A permanent Arc Testnet proof points to the accepted market artifact.'
+          : 'The trace record is prepared locally, but no Arc Testnet transaction is attached.',
         icon: <ShieldCheck aria-hidden="true" size={18} />,
+        body: (
+          <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <StepReveal>
+                <ArtifactField label="Trace status" value={formatTraceStatus(pipelineRun.trace)} />
+              </StepReveal>
+              <StepReveal index={1}>
+                <ArtifactField label="Network" value={pipelineRun.trace?.network ?? 'Arc Testnet'} />
+              </StepReveal>
+              <StepReveal index={2}>
+                <ArtifactField label="Trace hash" value={pipelineRun.trace?.traceHash ?? 'Pending'} />
+              </StepReveal>
+              <StepReveal index={3}>
+                <ArtifactField label="Artifact hash" value={pipelineRun.trace?.artifactHash ?? 'Pending'} />
+              </StepReveal>
+              <StepReveal index={4}>
+                <ArtifactField label="Transaction" value={pipelineRun.trace?.transactionId ?? 'Pending'} />
+              </StepReveal>
+              <StepReveal index={5}>
+                <ArtifactField label="Timestamp" value={pipelineRun.trace?.timestamp ?? 'Pending'} />
+              </StepReveal>
+            </div>
+            {traceCommitted && pipelineRun.trace?.explorerUrl && (
+              <StepReveal index={6}>
+                <a href={pipelineRun.trace.explorerUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-semibold text-[#305F72]">
+                  Open Arcscan transaction
+                  <ExternalLink aria-hidden="true" size={13} />
+                </a>
+              </StepReveal>
+            )}
+            {!traceCommitted && (
+              <StepReveal index={6} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 text-sm font-medium leading-6 text-[#77746B]">
+                Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
+              </StepReveal>
+            )}
+          </div>
+        ),
+      };
+    }
+
+    case 'x402': {
+      const publication = pipelineRun.x402;
+      const disabled = !publication || publication.status === 'disabled';
+
+      if (!pipelineRun.acceptedMarket) {
+        return createPendingArtifactView(activeStep, 'Access publication is waiting for a saved proof.');
+      }
+
+      return {
+        key: activeStep.id,
+        step: activeStep,
+        eyebrow: disabled ? 'Paid Access Disabled' : 'Publish Access',
+        title: disabled ? 'Paid access is disabled for this run.' : 'Paid artifact access is published.',
+        description: disabled
+          ? 'The final artifact is still reviewable, but x402 payment enforcement is not configured.'
+          : 'The final intelligence artifact now has price, gateway, and unlock metadata.',
+        icon: <Link aria-hidden="true" size={18} />,
         body: (
           <StepReveal className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E1D8] pt-6">
             <div>
-              <div className="eyebrow">Validated artifact</div>
+              <div className="eyebrow">Publication controls</div>
               {pipelineRun.analyzedInMs !== undefined && <Runtime runtimeMs={pipelineRun.analyzedInMs} />}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1412,43 +1522,41 @@ function getArtifactView({
           </StepReveal>
         ),
         footer: (
-          <div className="grid gap-6 sm:grid-cols-2">
-            <StepReveal>
-              <Criteria label="YES" value={market.yesCriteria} />
-            </StepReveal>
-            <StepReveal index={1}>
-              <Criteria label="NO" value={market.noCriteria} />
-            </StepReveal>
-            <StepReveal index={2} className="sm:col-span-2">
-              <ArtifactField label="Resolution" value={`${market.deadline} · ${market.resolutionSource}`} />
-              <p className="mt-4 max-w-3xl text-base leading-7 text-[#625F57]">{market.evidenceSummary}</p>
-            </StepReveal>
-            <StepReveal index={3} className="border-t border-[#E5E1D8] pt-6 sm:col-span-2">
-              <div className="grid gap-4 sm:grid-cols-3">
-                <ArtifactField label="Trace status" value={formatTraceStatus(pipelineRun.trace)} />
-                <ArtifactField label="Network" value={pipelineRun.trace?.network ?? 'Arc Testnet'} />
-                <ArtifactField label="Trace hash" value={pipelineRun.trace?.traceHash ?? 'Pending'} />
-              </div>
-              {traceCommitted && pipelineRun.trace?.explorerUrl && (
-                <a href={pipelineRun.trace.explorerUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-[#305F72]">
-                  Arcscan transaction
-                  <ExternalLink aria-hidden="true" size={13} />
-                </a>
-              )}
-              {!traceCommitted && (
-                <p className="mt-4 max-w-3xl text-sm font-medium leading-6 text-[#77746B]">
-                  Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
-                </p>
-              )}
-              {(activeStep.id === 'x402' && (!pipelineRun.x402 || pipelineRun.x402.status === 'disabled')) && (
-                <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-[#77746B]">
-                  x402 is disabled for this run and is not blocking artifact review.
-                </p>
-              )}
-            </StepReveal>
-            <StepReveal index={4} className="sm:col-span-2">
-              <ComparisonMoment pipelineRun={pipelineRun} />
-            </StepReveal>
+          <div className="grid gap-5">
+            {disabled && (
+              <StepReveal className="rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium leading-6 text-[#77746B]">
+                x402 is disabled for this run and is not blocking artifact review.
+              </StepReveal>
+            )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <StepReveal index={1}>
+                <ArtifactField label="Artifact ID" value={publication?.artifactId ?? pipelineRun.acceptedMarket.id} />
+              </StepReveal>
+              <StepReveal index={2}>
+                <ArtifactField label="Status" value={publication?.status ?? 'disabled'} />
+              </StepReveal>
+              <StepReveal index={3}>
+                <ArtifactField label="Price" value={formatUsdcPrice(publication?.priceUsdcMicro)} />
+              </StepReveal>
+              <StepReveal index={4}>
+                <ArtifactField label="Pay-to address" value={publication?.payToAddress ?? 'No seller wallet configured'} />
+              </StepReveal>
+              <StepReveal index={5}>
+                <ArtifactField label="Gateway" value={publication?.gatewayUrl ?? 'Not configured'} />
+              </StepReveal>
+              <StepReveal index={6}>
+                <ArtifactField label="Facilitator" value={publication?.facilitatorUrl ?? 'Not configured'} />
+              </StepReveal>
+              <StepReveal index={7}>
+                <ArtifactField label="Network" value={publication?.network ?? 'Not configured'} />
+              </StepReveal>
+              <StepReveal index={8}>
+                <ArtifactField label="Intelligence URL" value={publication?.intelligenceUrl ?? 'Not published'} />
+              </StepReveal>
+              <StepReveal index={9}>
+                <ArtifactField label="Unlock URL" value={publication?.demoUnlockUrl ?? 'Not available'} />
+              </StepReveal>
+            </div>
           </div>
         ),
       };
@@ -2225,6 +2333,10 @@ function getPresentationTarget(run: PipelineRun): { index: number; status: Pipel
 function getGatedPresentationTarget(run: PipelineRun, current: PresentedStepState): { index: number; status: PipelineStepStatus } {
   const target = getPresentationTarget(run);
 
+  if ((run.status === 'complete' || run.status === 'trace-committed') && target.index > current.index) {
+    return target;
+  }
+
   if (target.index <= current.index) {
     return target;
   }
@@ -2297,6 +2409,13 @@ function formatTraceStatus(trace: PipelineRun['trace']) {
   if (isCommittedTrace(trace)) return `Committed transaction ${trace?.transactionId}`;
   if (trace) return 'Trace prepared';
   return 'Preparing commit';
+}
+
+function formatUsdcPrice(value: number | null | undefined): string {
+  if (!value) return 'Not configured';
+
+  const usdc = value / 1_000_000;
+  return `${usdc.toLocaleString(undefined, { maximumFractionDigits: 6 })} USDC (${value} micro-USDC)`;
 }
 
 function formatErrorForCopy(run: PipelineRun): string {
