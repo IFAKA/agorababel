@@ -77,6 +77,24 @@
   --text-danger-strong: #8C3D32;
   --text-success-strong: #2E5B2D;
   --text-disabled: #9D998E;
+  --workflow-step-idle-bg: #F7F6F1;
+  --workflow-step-idle-border: #D8D3C8;
+  --workflow-step-idle-text: #8B877D;
+  --workflow-step-complete-bg: #FFFFFF;
+  --workflow-step-complete-border: #CFC8BA;
+  --workflow-step-complete-text: #171717;
+  --workflow-step-active-bg: #FFFFFF;
+  --workflow-step-active-border: #171717;
+  --workflow-step-active-text: #171717;
+  --workflow-step-selected-bg: #171717;
+  --workflow-step-selected-border: #171717;
+  --workflow-step-selected-text: #FFFFFF;
+  --workflow-step-failed-bg: #FFF9F5;
+  --workflow-step-failed-border: #8C3D32;
+  --workflow-step-failed-text: #8C3D32;
+  --workflow-connector-idle: #C8C1B3;
+  --workflow-connector-strong: #171717;
+  --workflow-connector-danger: #C58778;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
@@ -154,6 +172,24 @@
   --text-danger-strong: #FFC0B4;
   --text-success-strong: #C4D9A7;
   --text-disabled: #80786C;
+  --workflow-step-idle-bg: #171510;
+  --workflow-step-idle-border: #3A342B;
+  --workflow-step-idle-text: #948A7B;
+  --workflow-step-complete-bg: #211F1A;
+  --workflow-step-complete-border: #5A5144;
+  --workflow-step-complete-text: #F4F1EA;
+  --workflow-step-active-bg: #211F1A;
+  --workflow-step-active-border: #D6B178;
+  --workflow-step-active-text: #F4F1EA;
+  --workflow-step-selected-bg: #F4F1EA;
+  --workflow-step-selected-border: #F4F1EA;
+  --workflow-step-selected-text: #171411;
+  --workflow-step-failed-bg: #2B1712;
+  --workflow-step-failed-border: #A75A4D;
+  --workflow-step-failed-text: #FFC0B4;
+  --workflow-connector-idle: #51483A;
+  --workflow-connector-strong: #D6B178;
+  --workflow-connector-danger: #A75A4D;
 }
 
 @theme inline {
@@ -565,6 +601,104 @@
 
   .status-dot.pending {
     background: #7a7a76;
+  }
+
+  .workflow-step-trigger {
+    background: var(--workflow-step-idle-bg);
+    border-color: var(--workflow-step-idle-border);
+    color: var(--workflow-step-idle-text);
+  }
+
+  .workflow-step-trigger--pending {
+    background: var(--workflow-step-idle-bg);
+    border-color: var(--workflow-step-idle-border);
+    color: var(--workflow-step-idle-text);
+  }
+
+  .workflow-step-trigger--complete {
+    background: var(--workflow-step-complete-bg);
+    border-color: var(--workflow-step-complete-border);
+    color: var(--workflow-step-complete-text);
+  }
+
+  .workflow-step-trigger--complete:hover {
+    border-color: var(--workflow-step-active-border);
+  }
+
+  .workflow-step-trigger--selected {
+    background: var(--workflow-step-selected-bg);
+    border-color: var(--workflow-step-selected-border);
+    color: var(--workflow-step-selected-text);
+  }
+
+  .workflow-step-trigger--failed {
+    background: var(--workflow-step-failed-bg);
+    border-color: var(--workflow-step-failed-border);
+    color: var(--workflow-step-failed-text);
+  }
+
+  .workflow-step-mark {
+    background: var(--workflow-step-idle-bg);
+    border-color: var(--workflow-step-idle-border);
+    color: var(--workflow-step-idle-text);
+  }
+
+  .workflow-step-mark--pending {
+    background: var(--workflow-step-idle-bg);
+    border-color: var(--workflow-step-idle-border);
+    color: var(--workflow-step-idle-text);
+  }
+
+  .workflow-step-mark--complete {
+    background: var(--workflow-step-selected-bg);
+    border-color: var(--workflow-step-selected-border);
+    color: var(--workflow-step-selected-text);
+  }
+
+  .workflow-step-mark--active {
+    background: var(--workflow-step-active-bg);
+    border-color: var(--workflow-step-active-border);
+    color: var(--workflow-step-active-text);
+  }
+
+  .workflow-step-mark--failed {
+    background: var(--workflow-step-failed-border);
+    border-color: var(--workflow-step-failed-border);
+    color: #FFFFFF;
+  }
+
+  .workflow-step-mark--selected {
+    background: color-mix(in srgb, var(--workflow-step-selected-text) 12%, transparent);
+    border-color: color-mix(in srgb, var(--workflow-step-selected-text) 72%, transparent);
+    color: var(--workflow-step-selected-text);
+  }
+
+  .workflow-connector-guide--vertical.workflow-connector-guide--idle {
+    background-image: repeating-linear-gradient(to bottom, var(--workflow-connector-idle) 0 4px, transparent 4px 8px);
+  }
+
+  .workflow-connector-guide--vertical.workflow-connector-guide--failed {
+    background-image: repeating-linear-gradient(to bottom, var(--workflow-connector-danger) 0 4px, transparent 4px 8px);
+  }
+
+  .workflow-connector-guide--horizontal.workflow-connector-guide--idle {
+    background-image: repeating-linear-gradient(to right, var(--workflow-connector-idle) 0 4px, transparent 4px 8px);
+  }
+
+  .workflow-connector-guide--horizontal.workflow-connector-guide--failed {
+    background-image: repeating-linear-gradient(to right, var(--workflow-connector-danger) 0 4px, transparent 4px 8px);
+  }
+
+  .workflow-connector-fill {
+    background-color: var(--workflow-connector-strong);
+  }
+
+  .workflow-connector-handoff--vertical {
+    background: linear-gradient(to bottom, var(--workflow-connector-strong), var(--workflow-connector-strong), transparent);
+  }
+
+  .workflow-connector-handoff--horizontal {
+    background: linear-gradient(to right, var(--workflow-connector-strong), var(--workflow-connector-strong), transparent);
   }
 
   .icon-status {

@@ -448,14 +448,14 @@ function VerticalProgressRail({
                   disabled={disabled}
                   aria-current={selected ? 'step' : undefined}
                   aria-label={`${step.label}: ${step.description}`}
-                  className={`mt-1 grid size-7 place-items-center rounded-full border transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
+                  className={`workflow-step-trigger mt-1 grid size-7 place-items-center rounded-full border transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
                     selected
-                      ? 'border-[#171717] bg-[#171717] text-white shadow-[0_0_0_4px_rgba(23,23,23,0.08)]'
+                      ? 'workflow-step-trigger--selected shadow-[0_0_0_4px_rgba(23,23,23,0.08)]'
                       : state === 'complete'
-                        ? 'border-[#CFC8BA] bg-white text-[#171717] hover:border-[#171717]'
+                        ? 'workflow-step-trigger--complete'
                         : state === 'failed'
-                          ? 'border-[#8C3D32] bg-[#FFF9F5] text-[#8C3D32]'
-                          : 'border-[#D8D3C8] bg-[#F7F6F1] text-[#9D998E] opacity-80'
+                          ? 'workflow-step-trigger--failed'
+                          : 'workflow-step-trigger--pending'
                   }`}
                 >
                   <StepMark state={state} compact selected={selected} />
@@ -495,28 +495,26 @@ function VerticalStepConnector({
   const isPassed = state === 'complete' && nextState !== 'pending';
   const isPreparingNext = state === 'complete' && nextState === 'pending';
   const isFailed = state === 'failed';
-  const guideClassName = isFailed
-    ? 'bg-[repeating-linear-gradient(to_bottom,#C58778_0_4px,transparent_4px_8px)]'
-    : 'bg-[repeating-linear-gradient(to_bottom,#C8C1B3_0_4px,transparent_4px_8px)]';
+  const guideClassName = isFailed ? 'workflow-connector-guide--failed' : 'workflow-connector-guide--idle';
 
   return (
     <span aria-hidden="true" className="pointer-events-none relative my-1 h-8 w-px overflow-hidden">
-      <span className={`absolute inset-0 ${guideClassName}`} />
+      <span className={`workflow-connector-guide workflow-connector-guide--vertical absolute inset-0 ${guideClassName}`} />
       {isPassed && !reduceMotion ? (
         <motion.span
           key="vertical-solid-connector"
-          className="absolute inset-x-0 top-0 h-full origin-top bg-[#171717]"
+          className="workflow-connector-fill absolute inset-x-0 top-0 h-full origin-top"
           initial={{ scaleY: 0 }}
           animate={{ scaleY: 1 }}
           transition={{ duration: 0.62, ease: [0.23, 1, 0.32, 1] }}
           style={{ transformOrigin: 'top' }}
         />
       ) : isPassed ? (
-        <span className="absolute inset-0 bg-[#171717]" />
+        <span className="workflow-connector-fill absolute inset-0" />
       ) : isPreparingNext && !reduceMotion ? (
         <motion.span
           key="vertical-handoff-connector"
-          className="absolute inset-x-0 top-0 h-full origin-top bg-gradient-to-b from-[#171717] via-[#171717] to-transparent"
+          className="workflow-connector-handoff workflow-connector-handoff--vertical absolute inset-x-0 top-0 h-full origin-top"
           initial={{ scaleY: 0, opacity: 0 }}
           animate={{ scaleY: [0, 0.42, 0.72], opacity: [0, 1, 0.38] }}
           transition={{ duration: 0.86, ease: [0.23, 1, 0.32, 1] }}
@@ -639,14 +637,14 @@ function ProgressRail({
                     aria-label={`${step.label}: ${step.description}`}
                     className={`${
                       selected ? 'inline-flex h-10 w-[9.5rem] justify-start gap-2 px-3 sm:w-40' : 'inline-grid size-9 place-items-center'
-                    } items-center rounded-full border text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
+                    } workflow-step-trigger items-center rounded-full border text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
                       selected
-                        ? 'border-[#171717] bg-[#171717] text-white shadow-[0_0_0_4px_rgba(23,23,23,0.08),0_10px_24px_rgba(29,28,24,0.12)]'
+                        ? 'workflow-step-trigger--selected shadow-[0_0_0_4px_rgba(23,23,23,0.08),0_10px_24px_rgba(29,28,24,0.12)]'
                         : state === 'complete'
-                          ? 'border-[#CFC8BA] bg-white text-[#171717] hover:border-[#171717]'
+                          ? 'workflow-step-trigger--complete'
                           : state === 'failed'
-                            ? 'border-[#8C3D32] bg-[#FFF9F5] text-[#8C3D32]'
-                            : 'border-[#D8D3C8] bg-[#F7F6F1] text-[#9D998E] opacity-70'
+                            ? 'workflow-step-trigger--failed'
+                            : 'workflow-step-trigger--pending'
                     }`}
                   >
                     <StepMark state={state} compact selected={selected} />
@@ -685,28 +683,26 @@ function StepConnector({
   const isPassed = state === 'complete' && nextState !== 'pending';
   const isPreparingNext = state === 'complete' && nextState === 'pending';
   const isFailed = state === 'failed';
-  const guideClassName = isFailed
-    ? 'bg-[repeating-linear-gradient(to_right,#C58778_0_4px,transparent_4px_8px)]'
-    : 'bg-[repeating-linear-gradient(to_right,#C8C1B3_0_4px,transparent_4px_8px)]';
+  const guideClassName = isFailed ? 'workflow-connector-guide--failed' : 'workflow-connector-guide--idle';
 
   return (
     <span aria-hidden="true" className="pointer-events-none relative mx-1 h-px w-9 shrink-0 overflow-hidden sm:w-[clamp(2rem,5vw,5rem)]">
-      <span className={`absolute inset-0 ${guideClassName}`} />
+      <span className={`workflow-connector-guide workflow-connector-guide--horizontal absolute inset-0 ${guideClassName}`} />
       {isPassed && !reduceMotion ? (
         <motion.span
           key="solid-connector"
-          className="absolute inset-y-0 left-0 w-full origin-left bg-[#171717]"
+          className="workflow-connector-fill absolute inset-y-0 left-0 w-full origin-left"
           initial={{ scaleX: 0 }}
           animate={{ scaleX: 1 }}
           transition={{ duration: 0.62, ease: [0.23, 1, 0.32, 1] }}
           style={{ transformOrigin: 'left' }}
         />
       ) : isPassed ? (
-        <span className="absolute inset-0 bg-[#171717]" />
+        <span className="workflow-connector-fill absolute inset-0" />
       ) : isPreparingNext && !reduceMotion ? (
         <motion.span
           key="handoff-connector"
-          className="absolute inset-y-0 left-0 w-full origin-left bg-gradient-to-r from-[#171717] via-[#171717] to-transparent"
+          className="workflow-connector-handoff workflow-connector-handoff--horizontal absolute inset-y-0 left-0 w-full origin-left"
           initial={{ scaleX: 0, opacity: 0 }}
           animate={{ scaleX: [0, 0.42, 0.72], opacity: [0, 1, 0.38] }}
           transition={{ duration: 0.86, ease: [0.23, 1, 0.32, 1] }}
@@ -722,19 +718,19 @@ function StepConnector({
 function StepMark({ state, compact = false, selected = false }: { state: StepState; compact?: boolean; selected?: boolean }) {
   const reduceMotion = useReducedMotion();
   const className = selected
-    ? 'border-white/75 bg-white/10 text-white'
+    ? 'workflow-step-mark--selected'
     : state === 'complete'
-      ? 'border-[#171717] bg-[#171717] text-white'
+      ? 'workflow-step-mark--complete'
       : state === 'active'
-        ? 'border-[#171717] bg-white text-[#171717]'
+        ? 'workflow-step-mark--active'
         : state === 'failed'
-          ? 'border-[#8C3D32] bg-[#8C3D32] text-white'
-          : 'border-[#D8D3C8] bg-[#F7F6F1] text-[#9D998E]';
+          ? 'workflow-step-mark--failed'
+          : 'workflow-step-mark--pending';
   const sizeClassName = compact ? 'size-4' : 'size-5';
   const iconSize = compact ? 10 : 12;
 
   return (
-    <span className={`relative z-10 grid ${sizeClassName} place-items-center rounded-full border ${compact ? '' : 'mt-0.5'} ${className}`}>
+    <span className={`workflow-step-mark relative z-10 grid ${sizeClassName} place-items-center rounded-full border ${compact ? '' : 'mt-0.5'} ${className}`}>
       <AnimatePresence mode="wait" initial={false}>
         {state === 'complete' && (
           <motion.span
