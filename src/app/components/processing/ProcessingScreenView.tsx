@@ -395,14 +395,14 @@ function WorkflowSidebar({
   return (
     <aside className="min-w-0 lg:sticky lg:top-5 lg:self-start" aria-label="Create workflow sidebar">
       <div className="artifact-card overflow-hidden bg-white shadow-[0_20px_55px_rgba(29,28,24,0.06)]">
-        <div className="flex items-start justify-between gap-3 border-b border-[#EEE9DF] bg-[#FBFAF7] p-5">
-          <div>
+        <div className="flex items-start justify-between gap-4 border-b border-[#EEE9DF] bg-[#FBFAF7] p-5">
+          <div className="min-w-0 flex-1">
             <div className="eyebrow">Workflow</div>
             <p className="mt-2 text-sm font-medium leading-6 text-[#625F57]">Step through the run and revisit completed artifacts.</p>
           </div>
-          <button type="button" onClick={onNewAnalysis} className="secondary-button pressable h-10 min-h-10 px-3 text-xs">
+          <button type="button" onClick={onNewAnalysis} className="secondary-button pressable h-11 min-h-11 shrink-0 whitespace-nowrap px-4 text-sm">
             <span className="inline-flex items-center justify-center gap-2">
-              <RotateCcw aria-hidden="true" size={14} />
+              <RotateCcw aria-hidden="true" size={15} />
               New
             </span>
           </button>
