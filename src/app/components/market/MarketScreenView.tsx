@@ -37,6 +37,7 @@ export function MarketScreen({
             noCriteria: market.noCriteria,
             deadline: market.deadline,
             resolutionSource: market.resolutionSource,
+            marketBalance: market.marketBalance,
             criticVerdict: market.criticReasoning,
             traceSummary: describeTraceForMemo(trace),
           })
@@ -190,9 +191,9 @@ export function MarketScreen({
               </p>
             </section>
           ) : (
-            <article className="artifact-card overflow-hidden">
-              <div className="grid gap-4 p-5 sm:p-6">
-                <section className="grid gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm font-semibold text-[#292824] sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:items-center">
+            <article className="artifact-card min-w-0 overflow-hidden">
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 p-5 sm:p-6">
+                <section className="grid w-full min-w-0 max-w-full gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm font-semibold text-[#292824] sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:items-center">
                   <FlowStep label="Source" />
                   <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
                   <FlowStep label="Candidate Markets Rejected" />
@@ -226,7 +227,9 @@ export function MarketScreen({
                   <CriteriaBlock label="NO criteria" value={market.noCriteria} />
                 </section>
 
-                <section className="grid gap-4 border-t border-[#E5E1D8] pt-4 sm:grid-cols-2">
+                <MarketBalancePanel marketBalance={market.marketBalance} />
+
+                <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 border-t border-[#E5E1D8] pt-4 sm:grid-cols-2">
                   <ReportField label="Deadline" value={market.deadline} />
                   <ReportField label="Resolution source" value={market.resolutionSource} />
                   <ReportField label="Resolution criteria" value={market.criticReasoning} />
@@ -477,8 +480,54 @@ function ProofPanel({ title, children }: { title: string; children: ReactNode })
   );
 }
 
+function MarketBalancePanel({ marketBalance }: { marketBalance: NonNullable<PipelineRun['acceptedMarket']>['marketBalance'] }) {
+  const yes = marketBalance.yesProbability;
+  const no = marketBalance.noProbability;
+
+  return (
+    <section className="border-t border-[#E5E1D8] pt-4">
+      <div className="eyebrow">Market Balance</div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-[0.8fr_1.2fr]">
+        <div className="grid grid-cols-2 gap-3">
+          <ProbabilityTile label="YES estimate" value={yes} tone="yes" />
+          <ProbabilityTile label="NO estimate" value={no} tone="no" />
+        </div>
+        <div className="rounded-md border border-[#D8D3C8] bg-[#FBFAF7] p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-[#292824]">{formatBalanceVerdict(marketBalance.balanceVerdict)}</span>
+            <span className="rounded border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#625F57]">
+              Evidence-based estimate
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-[#625F57]">{marketBalance.balanceRationale}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProbabilityTile({ label, value, tone }: { label: string; value: number; tone: 'yes' | 'no' }) {
+  const barClassName = tone === 'yes' ? 'bg-[#526247]' : 'bg-[#8C3D32]';
+
+  return (
+    <div className="rounded-md border border-[#D8D3C8] bg-white p-3">
+      <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#77746B]">{label}</div>
+      <div className="mt-2 text-3xl font-semibold tracking-normal text-[#171717]">{value}%</div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#ECE7DC]">
+        <div className={`h-full rounded-full ${barClassName}`} style={{ width: `${value}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function formatBalanceVerdict(value: string) {
+  if (value === 'too-lopsided') return 'too-lopsided';
+  if (value === 'insufficient-evidence') return 'insufficient-evidence';
+  return 'balanced';
+}
+
 function FlowStep({ label }: { label: string }) {
-  return <div className="rounded border border-[#E5E1D8] bg-white px-3 py-2 text-center">{label}</div>;
+  return <div className="min-w-0 rounded border border-[#E5E1D8] bg-white px-3 py-2 text-center [overflow-wrap:anywhere]">{label}</div>;
 }
 
 function ArtifactComparison({ pipelineRun }: { pipelineRun: PipelineRun }) {
@@ -550,6 +599,7 @@ function createOperatorMemo({
   noCriteria,
   deadline,
   resolutionSource,
+  marketBalance,
   criticVerdict,
   traceSummary,
 }: {
@@ -562,6 +612,7 @@ function createOperatorMemo({
   noCriteria: string;
   deadline: string;
   resolutionSource: string;
+  marketBalance: NonNullable<PipelineRun['acceptedMarket']>['marketBalance'];
   criticVerdict: string;
   traceSummary: string;
 }) {
@@ -588,6 +639,13 @@ function createOperatorMemo({
     `YES: ${yesCriteria}`,
     '',
     `NO: ${noCriteria}`,
+    '',
+    '## Market Balance',
+    'Evidence-based estimate for business filtering, not financial advice or live market odds.',
+    `YES probability estimate: ${marketBalance.yesProbability}%`,
+    `NO probability estimate: ${marketBalance.noProbability}%`,
+    `Balance verdict: ${marketBalance.balanceVerdict}`,
+    `Rationale: ${marketBalance.balanceRationale}`,
     '',
     '## Resolution Criteria',
     'Official conditions required for resolution.',

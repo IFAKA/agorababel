@@ -33,6 +33,14 @@ export function enforceCritic(draft: LlmDraft, noveltyVerdict: 'new-opportunity'
     return reject(draft, `Critic review rejected the market: ${draft.criticVerdict.failedRules.join(', ') || 'one or more checks failed'}.`);
   }
 
+  if (candidate.marketBalance.balanceVerdict !== 'balanced') {
+    return reject(draft, `Critic review rejected the market because market balance is ${candidate.marketBalance.balanceVerdict}: ${candidate.marketBalance.balanceRationale}`);
+  }
+
+  if (candidate.marketBalance.yesProbability < 15 || candidate.marketBalance.yesProbability > 85) {
+    return reject(draft, `Critic review rejected the market because YES probability is ${candidate.marketBalance.yesProbability}%, outside the 15%-85% tradability range.`);
+  }
+
   return { status: 'accepted', criticVerdict: draft.criticVerdict };
 }
 

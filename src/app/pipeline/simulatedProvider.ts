@@ -691,6 +691,14 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
       resolutionSource,
       evidenceSummary: `${context.evidenceSummary} This draft resolves on the authority's official action, not whether media coverage spreads or prices move.`,
       confidenceScore: 82,
+      marketBalance: {
+        yesProbability: ingestion.region === 'Chile' && ingestion.topic.includes('CEOL') ? 58 : 62,
+        noProbability: ingestion.region === 'Chile' && ingestion.topic.includes('CEOL') ? 42 : 38,
+        balanceVerdict: 'balanced',
+        balanceRationale: ingestion.region === 'Chile' && ingestion.topic.includes('CEOL')
+          ? 'The source reports agreed terms, but official ratification and Contraloria review remain pending before the deadline.'
+          : 'The source is strong enough to support the claim, while the official resolver has not yet published a final confirmation.',
+      },
     },
     {
       id: 'draft-news-confirmation',
@@ -703,6 +711,12 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
       resolutionSource: 'Major English-language news coverage',
       evidenceSummary: 'Rejected because news coverage would measure downstream attention rather than the official government action.',
       confidenceScore: 55,
+      marketBalance: {
+        yesProbability: 78,
+        noProbability: 22,
+        balanceVerdict: 'balanced',
+        balanceRationale: 'Downstream media attention is plausible but still uncertain; it is rejected because the resolver is weak, not because of tradability.',
+      },
     },
     {
       id: 'draft-market-impact',
@@ -717,6 +731,12 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
       resolutionSource: 'Market price movement',
       evidenceSummary: 'Rejected because stock or asset-price movement is noisy and cannot prove whether official action occurred.',
       confidenceScore: 31,
+      marketBalance: {
+        yesProbability: 50,
+        noProbability: 50,
+        balanceVerdict: 'insufficient-evidence',
+        balanceRationale: 'The source does not provide enough information to estimate a market-price direction from official-action evidence.',
+      },
     },
     {
       id: 'draft-company-statement',
@@ -729,6 +749,12 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
       resolutionSource: 'Company statements',
       evidenceSummary: 'Rejected because company statements are weaker than an official government or Contraloria publication.',
       confidenceScore: 42,
+      marketBalance: {
+        yesProbability: 88,
+        noProbability: 12,
+        balanceVerdict: 'too-lopsided',
+        balanceRationale: 'A company statement is likely after agreed terms, making the question too obvious for a balanced YES/NO market.',
+      },
     },
   ];
 }

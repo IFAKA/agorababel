@@ -168,6 +168,12 @@ function createDraft(overrides: Partial<{
       resolverName,
       resolverUrl,
       evidenceSummary: 'The source describes the official decision and deadline.',
+      marketBalance: {
+        yesProbability: 55,
+        noProbability: 45,
+        balanceVerdict: 'balanced',
+        balanceRationale: 'The source describes a pending official decision with unresolved uncertainty before the deadline.',
+      },
     }],
     rejectedMarkets: [
       {

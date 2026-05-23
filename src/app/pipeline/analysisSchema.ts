@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 const nonEmptyText = z.string().trim().min(1);
+const marketProbability = z.number().int().min(0).max(100);
 const absoluteHttpUrl = z.string().trim().url().refine((value) => {
   const protocol = new URL(value).protocol;
   return protocol === 'http:' || protocol === 'https:';
@@ -35,6 +36,29 @@ export const SimilarMarketSchema = z.object({
   similarity: z.enum(['low', 'medium', 'high']),
 }).strict();
 
+export const MarketBalanceSchema = z.object({
+  yesProbability: marketProbability,
+  noProbability: marketProbability,
+  balanceVerdict: z.enum(['balanced', 'too-lopsided', 'insufficient-evidence']),
+  balanceRationale: nonEmptyText,
+}).strict().superRefine((value, context) => {
+  if (value.yesProbability + value.noProbability !== 100) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['noProbability'],
+      message: 'YES and NO probabilities must sum to 100.',
+    });
+  }
+
+  if ((value.yesProbability < 15 || value.yesProbability > 85) && value.balanceVerdict === 'balanced') {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['balanceVerdict'],
+      message: 'Markets below 15% YES or above 85% YES must not be marked balanced.',
+    });
+  }
+});
+
 export const MarketQuestionSchema = z.object({
   id: nonEmptyText,
   question: nonEmptyText,
@@ -44,6 +68,7 @@ export const MarketQuestionSchema = z.object({
   resolverName: nonEmptyText,
   resolverUrl: absoluteHttpUrl,
   evidenceSummary: nonEmptyText,
+  marketBalance: MarketBalanceSchema,
 }).strict();
 
 export const CriticCheckSchema = z.object({
@@ -182,6 +207,15 @@ export const AnalysisResultSchema = z.object({
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['marketComparison', 'noveltyVerdict'], message: 'Accepted result requires a new-opportunity novelty verdict.' });
     }
 
+    if (value.acceptedMarket?.marketBalance.balanceVerdict !== 'balanced') {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['acceptedMarket', 'marketBalance', 'balanceVerdict'], message: 'Accepted result requires a balanced market.' });
+    }
+
+    const yesProbability = value.acceptedMarket?.marketBalance.yesProbability;
+    if (yesProbability !== undefined && (yesProbability < 15 || yesProbability > 85)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['acceptedMarket', 'marketBalance', 'yesProbability'], message: 'Accepted result is too lopsided to trade.' });
+    }
+
     if (value.rejectionReason !== null) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['rejectionReason'], message: 'Accepted result cannot include a rejection reason.' });
     }
@@ -210,6 +244,7 @@ export const AnalysisResultSchema = z.object({
 export type PipelineStage = z.infer<typeof PipelineStageSchema>;
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
 export type MarketQuestion = z.infer<typeof MarketQuestionSchema>;
+export type MarketBalance = z.infer<typeof MarketBalanceSchema>;
 export type RejectedMarketReview = z.infer<typeof RejectedMarketReviewSchema>;
 export type CriticVerdict = z.infer<typeof CriticVerdictSchema>;
 export type CircleAgentWalletStatus = z.infer<typeof CircleAgentWalletStatusSchema>;
@@ -275,7 +310,7 @@ export const analysisJsonSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['id', 'question', 'yesCriteria', 'noCriteria', 'deadline', 'resolverName', 'resolverUrl', 'evidenceSummary'],
+        required: ['id', 'question', 'yesCriteria', 'noCriteria', 'deadline', 'resolverName', 'resolverUrl', 'evidenceSummary', 'marketBalance'],
         properties: {
           id: { type: 'string' },
           question: { type: 'string' },
@@ -285,6 +320,17 @@ export const analysisJsonSchema = {
           resolverName: { type: 'string' },
           resolverUrl: { type: 'string', pattern: '^https?://[^\\s]+$' },
           evidenceSummary: { type: 'string' },
+          marketBalance: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['yesProbability', 'noProbability', 'balanceVerdict', 'balanceRationale'],
+            properties: {
+              yesProbability: { type: 'integer', minimum: 0, maximum: 100 },
+              noProbability: { type: 'integer', minimum: 0, maximum: 100 },
+              balanceVerdict: { type: 'string', enum: ['balanced', 'too-lopsided', 'insufficient-evidence'] },
+              balanceRationale: { type: 'string' },
+            },
+          },
         },
       },
     },

@@ -55,6 +55,12 @@ function createDraft(candidateResolverUrl: string): LlmDraft {
       resolverName: 'Contraloria General de la Republica',
       resolverUrl: candidateResolverUrl,
       evidenceSummary: 'The source states the bill advanced to the Senate with a target date.',
+      marketBalance: {
+        yesProbability: 55,
+        noProbability: 45,
+        balanceVerdict: 'balanced',
+        balanceRationale: 'The source shows progress, but final official passage remains pending before the deadline.',
+      },
     }],
     rejectedMarkets: [
       {

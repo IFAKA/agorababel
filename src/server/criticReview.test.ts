@@ -59,6 +59,12 @@ function createDraft(overrides: {
       resolverName: 'Senado de Chile',
       resolverUrl: 'https://www.senado.cl/',
       evidenceSummary: 'The source states the bill advanced to the Senate with a target date.',
+      marketBalance: {
+        yesProbability: 55,
+        noProbability: 45,
+        balanceVerdict: 'balanced',
+        balanceRationale: 'The source shows progress, but final Senate passage remains pending before the deadline.',
+      },
     }],
     rejectedMarkets: [
       {

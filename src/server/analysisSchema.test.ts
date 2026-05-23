@@ -55,5 +55,54 @@ test('market artifact schema rejects non-HTTP resolver URLs', () => {
     resolverName: 'Official body',
     resolverUrl: 'mailto:resolver@example.com',
     evidenceSummary: 'The source named the official body and deadline.',
+    marketBalance: createMarketBalance(),
   }).success, false);
 });
+
+test('market artifact schema accepts valid probability balance data', () => {
+  assert.equal(MarketQuestionSchema.safeParse(createMarketQuestion()).success, true);
+});
+
+test('market artifact schema rejects missing probability balance data', () => {
+  const { marketBalance, ...market } = createMarketQuestion();
+
+  assert.equal(MarketQuestionSchema.safeParse(market).success, false);
+  assert.equal(marketBalance.yesProbability, 55);
+});
+
+test('market artifact schema rejects probability estimates that do not sum to 100', () => {
+  assert.equal(MarketQuestionSchema.safeParse(createMarketQuestion({
+    marketBalance: createMarketBalance({ yesProbability: 55, noProbability: 44 }),
+  })).success, false);
+});
+
+test('market artifact schema rejects lopsided markets marked as balanced', () => {
+  assert.equal(MarketQuestionSchema.safeParse(createMarketQuestion({
+    marketBalance: createMarketBalance({ yesProbability: 90, noProbability: 10, balanceVerdict: 'balanced' }),
+  })).success, false);
+});
+
+function createMarketQuestion(overrides = {}) {
+  return {
+    id: 'market-1',
+    question: 'Will the official body publish the decision before 2026-07-01?',
+    yesCriteria: 'YES if the official body publishes the decision before 2026-07-01.',
+    noCriteria: 'NO if the official body does not publish it before 2026-07-01.',
+    deadline: '2026-07-01',
+    resolverName: 'Official body',
+    resolverUrl: 'https://resolver.example.com/',
+    evidenceSummary: 'The source named the official body and deadline.',
+    marketBalance: createMarketBalance(),
+    ...overrides,
+  };
+}
+
+function createMarketBalance(overrides = {}) {
+  return {
+    yesProbability: 55,
+    noProbability: 45,
+    balanceVerdict: 'balanced',
+    balanceRationale: 'The source supports the claim, but official publication remains pending before the deadline.',
+    ...overrides,
+  };
+}

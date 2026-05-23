@@ -91,12 +91,44 @@ export function validateLlmMarketDraft(value: unknown): SchemaResult<MarketQuest
     resolutionSource: readString(value, 'resolutionSource'),
     evidenceSummary: readString(value, 'evidenceSummary'),
     confidenceScore: readNumber(value, 'confidenceScore'),
+    marketBalance: isRecord(value.marketBalance) ? {
+      yesProbability: readNumber(value.marketBalance, 'yesProbability'),
+      noProbability: readNumber(value.marketBalance, 'noProbability'),
+      balanceVerdict: readString(value.marketBalance, 'balanceVerdict'),
+      balanceRationale: readString(value.marketBalance, 'balanceRationale'),
+    } : undefined,
   };
 
   const invalidField = Object.entries(marketDraft).find(([, fieldValue]) => fieldValue === undefined);
 
   if (invalidField) {
     return { success: false, error: `Market draft is missing ${invalidField[0]}.` };
+  }
+
+  if (!['balanced', 'too-lopsided', 'insufficient-evidence'].includes(marketDraft.marketBalance.balanceVerdict ?? '')) {
+    return { success: false, error: 'Market draft balanceVerdict must be balanced, too-lopsided, or insufficient-evidence.' };
+  }
+
+  if (
+    !Number.isInteger(marketDraft.marketBalance.yesProbability)
+    || !Number.isInteger(marketDraft.marketBalance.noProbability)
+    || marketDraft.marketBalance.yesProbability < 0
+    || marketDraft.marketBalance.yesProbability > 100
+    || marketDraft.marketBalance.noProbability < 0
+    || marketDraft.marketBalance.noProbability > 100
+  ) {
+    return { success: false, error: 'Market draft probabilities must be integers from 0 to 100.' };
+  }
+
+  if (marketDraft.marketBalance.yesProbability + marketDraft.marketBalance.noProbability !== 100) {
+    return { success: false, error: 'Market draft YES and NO probabilities must sum to 100.' };
+  }
+
+  if (
+    marketDraft.marketBalance.balanceVerdict === 'balanced'
+    && (marketDraft.marketBalance.yesProbability < 15 || marketDraft.marketBalance.yesProbability > 85)
+  ) {
+    return { success: false, error: 'Market draft is too lopsided to be balanced.' };
   }
 
   return { success: true, data: marketDraft as MarketQuestionDraft };

@@ -20,6 +20,10 @@ export function getAcceptedMarketGuardrailFailure(
   if (!isConcreteIsoDeadline(acceptedMarket.deadline)) return 'Deadline must be an ISO-like concrete date.';
   if (!acceptedMarket.resolutionSource.trim()) return 'Resolution source is missing.';
   if (hasVagueResolutionLanguage(acceptedMarket.resolutionSource)) return 'Resolution source is too vague.';
+  if (!acceptedMarket.marketBalance) return 'Market balance estimate is missing.';
+  if (acceptedMarket.marketBalance.yesProbability + acceptedMarket.marketBalance.noProbability !== 100) return 'YES and NO probabilities must sum to 100.';
+  if (acceptedMarket.marketBalance.balanceVerdict !== 'balanced') return `Market balance is ${acceptedMarket.marketBalance.balanceVerdict}.`;
+  if (acceptedMarket.marketBalance.yesProbability < 15 || acceptedMarket.marketBalance.yesProbability > 85) return 'Accepted market is too lopsided to trade.';
   if (!isBinaryTimeBoundedQuestion(acceptedMarket.question, acceptedMarket.deadline)) {
     return 'Question is not clearly binary and time-bounded.';
   }

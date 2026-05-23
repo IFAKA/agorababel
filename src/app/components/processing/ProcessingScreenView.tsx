@@ -2371,6 +2371,8 @@ function formatMarketForCopy(run: PipelineRun): string {
     '',
     `YES: ${market.yesCriteria}`,
     `NO: ${market.noCriteria}`,
+    `Market balance: YES ${market.marketBalance.yesProbability}% / NO ${market.marketBalance.noProbability}% (${market.marketBalance.balanceVerdict})`,
+    `Balance rationale: ${market.marketBalance.balanceRationale}`,
     `Deadline: ${market.deadline}`,
     `Resolution source: ${market.resolutionSource}`,
     `Evidence: ${market.evidenceSummary}`,

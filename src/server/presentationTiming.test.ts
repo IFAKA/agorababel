@@ -142,6 +142,12 @@ test('long completed step text clamps to maximum dwell', () => {
       deadline: '2026-12-31',
       resolutionSource: 'Official source',
       evidenceSummary: Array.from({ length: 100 }, (_, index) => `evidence${index}`).join(' '),
+      marketBalance: {
+        yesProbability: 55,
+        noProbability: 45,
+        balanceVerdict: 'balanced',
+        balanceRationale: 'The source supports the claim, but the resolver has not published a final decision.',
+      },
     },
   ];
 

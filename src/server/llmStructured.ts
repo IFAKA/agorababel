@@ -14,6 +14,21 @@ const absoluteHttpUrl = z.string().trim().url().refine((value) => {
   const protocol = new URL(value).protocol;
   return protocol === 'http:' || protocol === 'https:';
 }, 'Invalid http(s) url');
+const marketProbability = z.number().int().min(0).max(100);
+const MarketBalanceDraftSchema = z.object({
+  yesProbability: marketProbability,
+  noProbability: marketProbability,
+  balanceVerdict: z.enum(['balanced', 'too-lopsided', 'insufficient-evidence']),
+  balanceRationale: z.string().trim().min(1),
+}).strict().superRefine((value, context) => {
+  if (value.yesProbability + value.noProbability !== 100) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['noProbability'],
+      message: 'YES and NO probabilities must sum to 100.',
+    });
+  }
+});
 
 const LlmDraftSchema = z.object({
   source: z.object({
@@ -45,6 +60,7 @@ const LlmDraftSchema = z.object({
     resolverName: z.string().trim().min(1),
     resolverUrl: absoluteHttpUrl,
     evidenceSummary: z.string().trim().min(1),
+    marketBalance: MarketBalanceDraftSchema,
   }).strict()).min(1).max(1),
   rejectedMarkets: z.array(z.object({
     draftId: z.string().trim().min(1),
@@ -212,6 +228,10 @@ function createSystemPrompt() {
     'resolver.url and candidateMarkets[0].resolverUrl must be the same absolute http or https URL. Prefer official URLs copied from the source; otherwise use the official homepage for the named resolver body, never a news article URL.',
     'Never omit criticVerdict.draftId, criticVerdict.reasoning, or criticVerdict.failedRules.',
     'The accepted market, if any, must be binary YES/NO, source-specific, deadline-bounded, and resolvable by the named official body.',
+    'candidateMarkets[0].marketBalance must estimate YES and NO probabilities from the source evidence, not from live betting markets. yesProbability and noProbability must be integers that sum to 100.',
+    'Use marketBalance.balanceVerdict="too-lopsided" if YES is below 15 or above 85; such markets should be rejected because almost nobody would rationally take the other side.',
+    'Use marketBalance.balanceVerdict="insufficient-evidence" if the source does not support an evidence-based probability estimate.',
+    'When estimating market balance, consider whether the event has already happened or is pending, source strength, resolver publication status, remaining uncertainty before the deadline, and whether the source describes intent, negotiation, approval, rejection, delay, or final publication.',
     'Do not invent deadlines, resolvers, publication dates, URLs, confidence scores, or facts absent from the source.',
     'Never use placeholder wording: official sources, named authority, public authority, otherwise, market reaction.',
     'Rejected candidate markets must be specific alternatives based on the same source, not generic examples.',
@@ -227,6 +247,7 @@ function createUserPrompt(sourceText: string, correction?: string) {
     'Do not return {rejected, reason}. If rejecting, still fill every required object/array and set criticVerdict.decision="rejected" plus a non-null rejectionReason.',
     'criticVerdict must always include draftId, decision, checks, reasoning, and failedRules.',
     'If accepting, set criticVerdict.draftId to candidateMarkets[0].id, criticVerdict.decision="accepted", criticVerdict.failedRules=[], rejectionReason=null, candidateMarkets length 1, and rejectedMarkets length at least 2.',
+    'Accept only if candidateMarkets[0].marketBalance.balanceVerdict="balanced" and yesProbability is between 15 and 85 inclusive.',
     'If rejecting, set criticVerdict.draftId to candidateMarkets[0].id when one candidate exists or null otherwise, set criticVerdict.failedRules to the failed rule names, and write a concrete criticVerdict.reasoning.',
     '',
     sourceText.slice(0, MAX_LLM_SOURCE_CHARS),
