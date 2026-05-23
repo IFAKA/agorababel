@@ -27,6 +27,27 @@ export function updateStepText(
   });
 }
 
+export function appendStepReasoning(
+  run: PipelineRun,
+  stepId: PipelineStep['id'],
+  reasoningSnippet: string,
+): PipelineRun {
+  const nextSnippet = reasoningSnippet.trim();
+
+  if (!nextSnippet) return run;
+
+  return updateRun(run, {
+    steps: run.steps.map((step) => {
+      if (step.id !== stepId) return step;
+
+      return {
+        ...step,
+        reasoningSnippet: appendUniqueLine(step.reasoningSnippet, nextSnippet),
+      };
+    }),
+  });
+}
+
 export function hydrateStep(run: PipelineRun, sourceStep: PipelineStep): PipelineRun {
   return updateRun(run, {
     steps: run.steps.map((step) => (step.id === sourceStep.id ? { ...sourceStep, status: step.status } : step)),
@@ -121,4 +142,15 @@ function settleOperationsBeforeAppend(
       status: nextStatus === 'failed' ? 'failed' : 'complete',
     };
   });
+}
+
+function appendUniqueLine(currentValue: string, nextValue: string): string {
+  const lines = currentValue
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.includes(nextValue)) return currentValue;
+
+  return [...lines, nextValue].slice(-4).join('\n');
 }

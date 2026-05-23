@@ -1536,7 +1536,7 @@ function createPendingArtifactView(step: PipelineStep, title: string): ArtifactV
     step,
     eyebrow: 'Queued',
     title,
-    description: formatStepStatus(step.status),
+    description: step.status === 'running' ? step.reasoningSnippet : formatStepStatus(step.status),
     icon: <LoaderCircle aria-hidden="true" size={18} />,
     body: (
       <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 text-sm leading-6 text-[#625F57]">
@@ -1605,7 +1605,7 @@ function StepArtifactFrame({
                   </div>
                 )}
               </div>
-              {description && <p className="mt-5 max-w-2xl text-lg leading-8 text-[#625F57]">{description}</p>}
+              {description && <p className="mt-5 max-w-2xl whitespace-pre-line text-lg leading-8 text-[#625F57]">{description}</p>}
               {children}
             </div>
             {footer && <div className="border-t border-[#E5E1D8] bg-[#FBFAF7] p-8 sm:p-10">{footer}</div>}

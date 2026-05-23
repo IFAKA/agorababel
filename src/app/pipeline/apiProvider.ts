@@ -1,6 +1,6 @@
 import { AnalysisResultSchema, type AnalysisResult, type PipelineStage } from './analysisSchema';
 import { createPendingPipelineRun, createSubmission } from './simulatedProvider';
-import { appendActivity, appendOperation, compactMetadata, completeStepOperations, failStepOperations, updateRun, updateStep, updateStepText } from './runState';
+import { appendActivity, appendOperation, appendStepReasoning, compactMetadata, completeStepOperations, failStepOperations, updateRun, updateStep, updateStepText } from './runState';
 import { canonicalStageOrder, labelForStep, stepIdForStage } from './stages';
 import type {
   AcceptedMarket,
@@ -69,7 +69,7 @@ export class ApiPipelineProvider implements PipelineProvider {
 
         if (event.type === 'step-started') {
           const stepId = stepIdForStage(event.stage);
-          run = updateStepText(run, stepId, { reasoningSnippet: event.message });
+          run = appendStepReasoning(run, stepId, event.message);
           run = updateStep(run, stepId, 'running');
           run = appendActivity(run, labelForStep(stepId), 'running', event.message, 'Backend stage started.');
           run = appendOperation(run, stepId, {
@@ -84,7 +84,7 @@ export class ApiPipelineProvider implements PipelineProvider {
 
         if (event.type === 'step-note') {
           const stepId = stepIdForStage(event.stage);
-          run = updateStepText(run, stepId, { reasoningSnippet: event.message });
+          run = appendStepReasoning(run, stepId, event.message);
           run = appendActivity(run, labelForStep(stepId), 'running', event.message, 'Live backend progress note.');
           run = appendOperation(run, stepId, {
             label: liveOperationLabelForStage(event.stage, 'note'),
@@ -513,16 +513,6 @@ function toClientTraceFromArcTrace(trace: NonNullable<AnalysisResult['arcTrace']
     sourceHash: trace.sourceHash,
     chainId: trace.chainId,
   };
-}
-
-function updateStepText(
-  run: PipelineRun,
-  stepId: PipelineStep['id'],
-  updates: Partial<Pick<PipelineStep, 'reasoningSnippet' | 'outputSummary'>>,
-): PipelineRun {
-  return updateRun(run, {
-    steps: run.steps.map((step) => (step.id === stepId ? { ...step, ...updates } : step)),
-  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

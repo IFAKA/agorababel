@@ -1,5 +1,5 @@
 import { sampleArticle } from '../sampleArticleData';
-import { appendActivity, appendOperation as appendRunOperation, completeStepOperations, hydrateStep, updateRun, updateStep, updateStepText } from './runState';
+import { appendActivity, appendOperation as appendRunOperation, appendStepReasoning, completeStepOperations, hydrateStep, updateRun, updateStep } from './runState';
 import { createCanonicalPipelineStep, createPipelineStep } from './stages';
 import type {
   AcceptedMarket,
@@ -71,7 +71,7 @@ export class SimulatedPipelineProvider implements PipelineProvider {
         for (const note of runningNotesForStep(step)) {
           await wait(SAMPLE_OPERATION_DELAY_MS, input.signal);
 
-          run = updateStepText(run, step.id, { reasoningSnippet: note });
+          run = appendStepReasoning(run, step.id, note);
           run = appendActivity(run, step.agentName, 'running', note, 'Preview log update for the current stage.');
           run = appendOperation(run, step.id, {
             label: demoOperationLabelForStep(step.id, 'note'),
