@@ -483,6 +483,9 @@ function VerticalProgressRail({
                 }`}
               >
                 <span className="block truncate text-sm font-semibold leading-5">{step.label}</span>
+                <span className={`mt-0.5 block text-xs leading-4 ${selected ? 'text-white/70' : disabled ? 'text-[#B3AEA3]' : 'text-[#756F64]'}`}>
+                  {step.description}
+                </span>
               </button>
             </li>
           );
