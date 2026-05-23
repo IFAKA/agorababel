@@ -71,6 +71,11 @@ const stepRevealTransition = {
   ease: [0.23, 1, 0.32, 1],
 };
 
+const stepLayoutTransition = {
+  duration: 0.24,
+  ease: [0.23, 1, 0.32, 1],
+};
+
 const stepExitTransition = {
   duration: 0.16,
   ease: [0.23, 1, 0.32, 1],
@@ -1575,12 +1580,13 @@ function StepArtifactFrame({
 }) {
   return (
     <motion.section
-      transition={reduceMotion ? { duration: 0.001 } : stepRevealTransition}
+      layout={reduceMotion ? false : 'size'}
+      transition={reduceMotion ? { duration: 0.001 } : { ...stepRevealTransition, layout: stepLayoutTransition }}
       className={`artifact-card min-w-0 overflow-visible ${className}`}
     >
       {progressRail && <div className="relative z-40 border-b border-[#EEE9DF] bg-[#FBFAF7] px-6 py-4 sm:px-8 lg:px-10">{progressRail}</div>}
-      <div className="grid overflow-hidden">
-        <AnimatePresence initial={false} custom={transitionDirection}>
+      <div className="relative grid overflow-hidden">
+        <AnimatePresence initial={false} custom={transitionDirection} mode="popLayout">
           <motion.div
             key={contentKey ?? title}
             custom={transitionDirection}
