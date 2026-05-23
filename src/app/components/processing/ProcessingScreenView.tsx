@@ -459,7 +459,7 @@ function VerticalProgressRail({
                   }}
                   disabled={disabled}
                   aria-current={selected ? 'step' : undefined}
-                  aria-label={`${step.label}: ${step.description}`}
+                  aria-label={`${step.label}: ${formatStepStatus(step.status)}. ${step.description}`}
                   className={`workflow-step-trigger mt-1 grid size-7 place-items-center rounded-full border transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
                     selected
                       ? 'workflow-step-trigger--selected shadow-[0_0_0_4px_rgba(23,23,23,0.08)]'
@@ -485,7 +485,6 @@ function VerticalProgressRail({
                 }`}
               >
                 <span className="block truncate text-sm font-semibold leading-5">{step.label}</span>
-                <span className={`mt-0.5 block text-xs font-medium leading-5 ${selected ? 'text-white/72' : 'text-[#77746B]'}`}>{formatStepStatus(step.status)}</span>
               </button>
             </li>
           );
@@ -646,7 +645,7 @@ function ProgressRail({
                     onBlur={() => setTooltip(null)}
                     disabled={disabled}
                     aria-current={selected ? 'step' : undefined}
-                    aria-label={`${step.label}: ${step.description}`}
+                    aria-label={`${step.label}: ${formatStepStatus(step.status)}. ${step.description}`}
                     className={`${
                       selected ? 'inline-flex h-10 w-[9.5rem] justify-start gap-2 px-3 sm:w-40' : 'inline-grid size-9 place-items-center'
                     } workflow-step-trigger items-center rounded-full border text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
