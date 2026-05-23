@@ -480,7 +480,7 @@ function VerticalProgressRail({
                   if (!disabled) onSelectStep(step.id);
                 }}
                 disabled={disabled}
-                className={`min-w-0 rounded-md px-2 py-1.5 text-left transition-colors duration-200 disabled:cursor-not-allowed ${
+                className={`mt-0.5 min-w-0 self-start rounded-md px-2 py-1.5 text-left transition-colors duration-200 disabled:cursor-not-allowed ${
                   selected ? 'bg-[#171717] text-white' : disabled ? 'text-[#9D998E]' : 'text-[#292824] hover:bg-[#F7F6F1]'
                 }`}
               >
