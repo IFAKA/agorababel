@@ -32,7 +32,6 @@ import {
   clamp,
   getCompletedStepDwellMs,
   getOneStepPresentationTarget,
-  getStepBriefing,
   type PresentedStepState,
 } from '../../pipeline/presentationTiming';
 import type { CriticVerdict, MarketQuestion, PipelineRun, PipelineStep, PipelineStepStatus, SourceAnalysis } from '../../pipeline/types';
@@ -272,6 +271,7 @@ export function ProcessingScreen({
             <WorkflowSidebar
               steps={progressSteps}
               selectedStepId={selectedProgressStepId}
+              runStatus={pipelineRun.status}
               historyItems={submissionHistory}
               onSelectStep={handleSelectProgressStep}
               onSelectHistoryItem={onSelectSubmission}
@@ -289,7 +289,6 @@ export function ProcessingScreen({
               onCopy={handleCopy}
               onCopyError={handleCopyError}
               onOpenFinalArtifact={onOpenFinalArtifact}
-              onNewAnalysis={onNewAnalysis}
               isComplete={isComplete}
               transitionDirection={!hasStarted || showSourceAccepted || (hasStarted && displayedStepIndex === 0 && presentedStep.status === 'running') ? 1 : stepTransitionDirection}
               showSourceInput={!hasStarted}
@@ -387,6 +386,7 @@ function SourceInput({
 function WorkflowSidebar({
   steps,
   selectedStepId,
+  runStatus,
   historyItems,
   onSelectStep,
   onSelectHistoryItem,
@@ -394,18 +394,23 @@ function WorkflowSidebar({
 }: {
   steps: ProgressStep[];
   selectedStepId?: ProgressStepId;
+  runStatus: PipelineRun['status'];
   historyItems: HistoryItem[];
   onSelectStep: (stepId: ProgressStepId) => void;
   onSelectHistoryItem: (id: string) => void;
   onNewAnalysis: () => void;
 }) {
+  const runState = getRunStateLabel(runStatus);
+
   return (
     <aside className="min-w-0 lg:sticky lg:top-5 lg:self-start" aria-label="Create workflow sidebar">
       <div className="artifact-card overflow-hidden bg-white shadow-[0_20px_55px_rgba(29,28,24,0.06)]">
         <div className="flex items-start justify-between gap-4 border-b border-[#EEE9DF] bg-[#FBFAF7] p-5">
           <div className="min-w-0 flex-1">
             <div className="eyebrow">Workflow</div>
-            <p className="mt-2 text-sm font-medium leading-6 text-[#625F57]">Step through the run and revisit completed artifacts.</p>
+            <div className="mt-2 inline-flex rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-[#625F57]">
+              {runState}
+            </div>
           </div>
           <button type="button" onClick={onNewAnalysis} className="secondary-button pressable h-11 min-h-11 shrink-0 whitespace-nowrap px-4 text-sm">
             <span className="inline-flex items-center justify-center gap-2">
@@ -480,7 +485,7 @@ function VerticalProgressRail({
                 }`}
               >
                 <span className="block truncate text-sm font-semibold leading-5">{step.label}</span>
-                <span className={`mt-1 block text-xs leading-5 ${selected ? 'text-white/72' : 'text-[#77746B]'}`}>{step.description}</span>
+                <span className={`mt-0.5 block text-xs font-medium leading-5 ${selected ? 'text-white/72' : 'text-[#77746B]'}`}>{formatStepStatus(step.status)}</span>
               </button>
             </li>
           );
@@ -671,7 +676,7 @@ function ProgressRail({
           style={{ left: tooltip.left, top: tooltip.top }}
         >
           <span className="block font-semibold text-[#171717]">{tooltipStep.label}</span>
-          {tooltipStep.description}
+          {formatStepStatus(tooltipStep.status)}
         </span>
       )}
     </nav>
@@ -789,7 +794,6 @@ function PipelineArtifact({
   onCopy,
   onCopyError,
   onOpenFinalArtifact,
-  onNewAnalysis,
   isComplete,
   progressRail,
   transitionDirection,
@@ -808,7 +812,6 @@ function PipelineArtifact({
   onCopy: () => void;
   onCopyError: () => void;
   onOpenFinalArtifact: () => void;
-  onNewAnalysis: () => void;
   isComplete: boolean;
   progressRail?: ReactNode;
   transitionDirection: StepTransitionDirection;
@@ -839,12 +842,6 @@ function PipelineArtifact({
                 {errorCopied ? 'Copied' : 'Copy fix brief'}
               </span>
             </button>
-            <button type="button" onClick={onNewAnalysis} className="primary-button pressable px-4">
-              <span className="inline-flex items-center justify-center gap-2">
-                <RotateCcw aria-hidden="true" size={15} />
-                New analysis
-              </span>
-            </button>
           </div>
           <p className="mt-4 text-lg leading-8 text-[#3E2723]">{pipelineRun.error}</p>
           {errorBrief && (
@@ -873,7 +870,6 @@ function PipelineArtifact({
           copied,
           onCopy,
           onOpenFinalArtifact,
-          onNewAnalysis,
           isComplete,
         });
 
@@ -892,36 +888,6 @@ function PipelineArtifact({
       reduceMotion={Boolean(reduceMotion)}
     >
       {view.body}
-      {isComplete && view.key !== 'x402' && (
-        <StepReveal className="mt-8 border-t border-[#E5E1D8] pt-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="eyebrow">Completed run</div>
-              {pipelineRun.analyzedInMs !== undefined && <Runtime runtimeMs={pipelineRun.analyzedInMs} />}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={onCopy} className="secondary-button pressable px-4">
-                <span className="inline-flex items-center justify-center gap-2">
-                  {copied ? <Check aria-hidden="true" size={15} /> : <Clipboard aria-hidden="true" size={15} />}
-                  {copied ? 'Copied' : 'Copy'}
-                </span>
-              </button>
-              <button type="button" onClick={onOpenFinalArtifact} className="primary-button pressable px-4">
-                <span className="inline-flex items-center justify-center gap-2">
-                  Open artifact
-                  <ArrowRight aria-hidden="true" size={15} />
-                </span>
-              </button>
-              <button type="button" onClick={onNewAnalysis} className="secondary-button pressable px-4">
-                <span className="inline-flex items-center justify-center gap-2">
-                  <RotateCcw aria-hidden="true" size={15} />
-                  New analysis
-                </span>
-              </button>
-            </div>
-          </div>
-        </StepReveal>
-      )}
     </StepArtifactFrame>
   );
 }
@@ -941,7 +907,6 @@ function getSourceInputView({
     key: 'source-input',
     eyebrow: 'Source',
     title: 'Source analysis is ready.',
-    description: 'Paste source material to produce a validated artifact with rejected candidates and an audit trace.',
     icon: <FileText aria-hidden="true" size={18} />,
     body: (
       <SourceInput
@@ -959,14 +924,13 @@ function getSourceAcceptedView(pipelineRun: PipelineRun, fallbackSourceText: str
   const submittedSource = pipelineRun.sourceInput || fallbackSourceText;
   const sourceSummary = getSubmittedSourceSummary(submittedSource);
   const extracted = pipelineRun.extractedSource;
+  const showExtractedSeparately = Boolean(extracted && !isEffectivelySameSource(sourceSummary.text, extracted.text));
 
   return {
     key: 'source-accepted',
     eyebrow: 'Source',
     title: 'Submitted source.',
-    description: handoffActive
-      ? 'The submitted source is locked and queued for extraction.'
-      : 'This is the exact input attached to the current run.',
+    description: handoffActive ? 'Queued' : undefined,
     icon: handoffActive
       ? <LoaderCircle aria-hidden="true" className={reduceMotion ? '' : 'animate-spin'} size={18} />
       : <FileText aria-hidden="true" size={18} />,
@@ -975,32 +939,38 @@ function getSourceAcceptedView(pipelineRun: PipelineRun, fallbackSourceText: str
         <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="eyebrow">Submitted source</div>
-            <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
-              {sourceSummary.kind}
-            </span>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
+                {sourceSummary.kind}
+              </span>
+              {extracted && (
+                <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
+                  {extracted.domain}
+                </span>
+              )}
+            </div>
           </div>
           <div className="mt-3 max-h-72 overflow-y-auto rounded-md border border-[#E5E1D8] bg-white p-4 text-base leading-7 text-[#292824] [overflow-wrap:anywhere] whitespace-pre-wrap">
             {sourceSummary.text}
           </div>
         </StepReveal>
-        {extracted && (
-          <StepReveal index={1} className="mt-5 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="eyebrow">Extracted source text</div>
-              <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
-                {extracted.domain}
-              </span>
-            </div>
-            <div className="mt-3 max-h-96 overflow-y-auto rounded-md border border-[#E5E1D8] bg-white p-4 text-base leading-7 text-[#292824] [overflow-wrap:anywhere] whitespace-pre-wrap">
-              <div className="mb-3 font-medium">{extracted.title}</div>
-              {extracted.text}
-            </div>
+        {extracted && showExtractedSeparately && (
+          <StepReveal index={1} className="mt-5">
+            <details className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+              <summary className="cursor-pointer select-none text-sm font-semibold uppercase leading-5 tracking-[0.08em] text-[#625F57]">
+                Extracted text
+              </summary>
+              <div className="mt-3 max-h-80 overflow-y-auto rounded-md border border-[#E5E1D8] bg-white p-4 text-base leading-7 text-[#292824] [overflow-wrap:anywhere] whitespace-pre-wrap">
+                <div className="mb-3 font-medium">{extracted.title}</div>
+                {extracted.text}
+              </div>
+            </details>
           </StepReveal>
         )}
         {handoffActive && (
-          <StepReveal index={extracted ? 2 : 1} className="mt-5 flex items-center gap-3 rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium text-[#625F57]">
+          <StepReveal index={showExtractedSeparately ? 2 : 1} className="mt-5 flex items-center gap-3 rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium text-[#625F57]">
             <LoaderCircle aria-hidden="true" className={`shrink-0 text-[#292824] ${reduceMotion ? '' : 'animate-spin'}`} size={16} />
-            Source handoff is being prepared for the first analysis agent.
+            Running
           </StepReveal>
         )}
       </>
@@ -1014,7 +984,6 @@ function getArtifactView({
   copied,
   onCopy,
   onOpenFinalArtifact,
-  onNewAnalysis,
   isComplete,
 }: {
   pipelineRun: PipelineRun;
@@ -1022,7 +991,6 @@ function getArtifactView({
   copied: boolean;
   onCopy: () => void;
   onOpenFinalArtifact: () => void;
-  onNewAnalysis: () => void;
   isComplete: boolean;
 }): ArtifactView {
   if (!activeStep) {
@@ -1030,11 +998,11 @@ function getArtifactView({
       key: 'preparing',
       eyebrow: 'Queued',
       title: 'Analysis is preparing.',
-      description: 'Waiting for the first workflow update.',
+      description: 'Waiting',
       icon: <LoaderCircle aria-hidden="true" size={18} />,
       body: (
         <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 text-sm leading-6 text-[#625F57]">
-          The workflow will update this card as soon as provider data arrives.
+          Waiting
         </StepReveal>
       ),
     };
@@ -1044,7 +1012,6 @@ function getArtifactView({
     case 'extraction': {
       const extracted = pipelineRun.extractedSource;
       const title = getExtractionTitle(pipelineRun, activeStep);
-      const description = extracted ? extracted.domain : activeStep.reasoningSnippet;
       const sourceExcerpt = getSourceExcerpt(pipelineRun);
 
       return {
@@ -1052,7 +1019,7 @@ function getArtifactView({
         step: activeStep,
         eyebrow: 'Read Source',
         title,
-        description,
+        description: extracted ? extracted.domain : formatStepStatus(activeStep.status),
         icon: <FileText aria-hidden="true" size={18} />,
         body: (
           <>
@@ -1098,7 +1065,6 @@ function getArtifactView({
         step: activeStep,
         eyebrow: 'Source Details',
         title: ingestion.signalName,
-        description: 'These are the basic facts the market draft will use.',
         icon: <Globe2 aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -1125,7 +1091,6 @@ function getArtifactView({
         step: activeStep,
         eyebrow: 'Find Main Claim',
         title: pipelineRun.analysis?.claim.summary ?? getNormalizedClaim(ingestion),
-        description: 'The claim is reduced to the event, supporting evidence, and deadline the market can resolve against.',
         icon: <Languages aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1192,7 +1157,6 @@ function getArtifactView({
         step: activeStep,
         eyebrow: 'Check Official Source',
         title: resolver.name,
-        description: `This official source can be used to decide the market: ${resolver.verificationEvidence}`,
         icon: <Globe2 aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1222,7 +1186,6 @@ function getArtifactView({
         step: activeStep,
         eyebrow: 'Check Duplicates',
         title: comparison.noveltyVerdict === 'new-opportunity' ? 'No close duplicate found' : `Duplicate check: ${comparison.noveltyVerdict}`,
-        description: `Search result: ${comparison.reasoning}`,
         icon: <ListChecks aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1254,7 +1217,6 @@ function getArtifactView({
         step: activeStep,
         eyebrow: 'Translation & Context',
         title: context.englishSummary,
-        description: context.relevanceExplanation,
         icon: <Languages aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1285,7 +1247,6 @@ function getArtifactView({
         step: activeStep,
         eyebrow: 'Write Market',
         title: market.question,
-        description: 'This draft asks about an official outcome, so the answer can be checked later.',
         icon: <Link aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2">
@@ -1319,7 +1280,6 @@ function getArtifactView({
         step: activeStep,
         eyebrow: 'Quality Check',
         title: 'Market drafts are checked before approval.',
-        description: 'A draft passes only if the wording is clear, evidence-backed, not duplicated, and easy to resolve.',
         icon: <ListChecks aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-5">
@@ -1421,9 +1381,6 @@ function getArtifactView({
         step: activeStep,
         eyebrow: traceCommitted ? 'Proof Saved' : 'Proof Prepared',
         title: traceCommitted ? 'Arc proof saved.' : 'Proof prepared for review.',
-        description: traceCommitted
-          ? 'A permanent Arc Testnet proof points to the accepted market artifact.'
-          : 'The trace record is prepared locally, but no Arc Testnet transaction is attached.',
         icon: <ShieldCheck aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6">
@@ -1468,8 +1425,9 @@ function getArtifactView({
     case 'x402': {
       const publication = pipelineRun.x402;
       const disabled = !publication || publication.status === 'disabled';
+      const market = pipelineRun.acceptedMarket;
 
-      if (!pipelineRun.acceptedMarket) {
+      if (!market) {
         return createPendingArtifactView(activeStep, 'Access publication is waiting for a saved proof.');
       }
 
@@ -1477,15 +1435,12 @@ function getArtifactView({
         key: activeStep.id,
         step: activeStep,
         eyebrow: disabled ? 'Paid Access Disabled' : 'Publish Access',
-        title: disabled ? 'Paid access is disabled for this run.' : 'Paid artifact access is published.',
-        description: disabled
-          ? 'The final artifact is still reviewable, but x402 payment enforcement is not configured.'
-          : 'The final intelligence artifact now has price, gateway, and unlock metadata.',
+        title: market.question,
         icon: <Link aria-hidden="true" size={18} />,
         body: (
           <StepReveal className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E1D8] pt-6">
             <div>
-              <div className="eyebrow">Publication controls</div>
+              <div className="eyebrow">Validated artifact</div>
               {pipelineRun.analyzedInMs !== undefined && <Runtime runtimeMs={pipelineRun.analyzedInMs} />}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1512,17 +1467,31 @@ function getArtifactView({
                   </span>
                 </button>
               )}
-              <button type="button" onClick={onNewAnalysis} className="secondary-button pressable px-4">
-                <span className="inline-flex items-center justify-center gap-2">
-                  <RotateCcw aria-hidden="true" size={15} />
-                  New analysis
-                </span>
-              </button>
             </div>
           </StepReveal>
         ),
         footer: (
           <div className="grid gap-5">
+            <div className="grid gap-6 sm:grid-cols-2">
+              <StepReveal>
+                <Criteria label="YES" value={market.yesCriteria} />
+              </StepReveal>
+              <StepReveal index={1}>
+                <Criteria label="NO" value={market.noCriteria} />
+              </StepReveal>
+              <StepReveal index={2} className="sm:col-span-2">
+                <ArtifactField label="Resolution" value={`${market.deadline} · ${market.resolutionSource}`} />
+                <p className="mt-4 max-w-3xl text-base leading-7 text-[#625F57]">{market.evidenceSummary}</p>
+              </StepReveal>
+              <StepReveal index={3} className="sm:col-span-2">
+                <ComparisonMoment pipelineRun={pipelineRun} />
+              </StepReveal>
+              {!isCommittedTrace(pipelineRun.trace) && (
+                <StepReveal index={4} className="rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium leading-6 text-[#77746B] sm:col-span-2">
+                  Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
+                </StepReveal>
+              )}
+            </div>
             {disabled && (
               <StepReveal className="rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium leading-6 text-[#77746B]">
                 x402 is disabled for this run and is not blocking artifact review.
@@ -1573,11 +1542,11 @@ function createPendingArtifactView(step: PipelineStep, title: string): ArtifactV
     step,
     eyebrow: 'Queued',
     title,
-    description: step.reasoningSnippet,
+    description: formatStepStatus(step.status),
     icon: <LoaderCircle aria-hidden="true" size={18} />,
     body: (
       <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 text-sm leading-6 text-[#625F57]">
-        The workflow will update this card as soon as provider data arrives.
+        {formatStepStatus(step.status)}
       </StepReveal>
     ),
   };
@@ -1643,33 +1612,13 @@ function StepArtifactFrame({
                 )}
               </div>
               {description && <p className="mt-5 max-w-2xl text-lg leading-8 text-[#625F57]">{description}</p>}
-              {step && <StepBrief step={step} />}
               {children}
             </div>
             {footer && <div className="border-t border-[#E5E1D8] bg-[#FBFAF7] p-8 sm:p-10">{footer}</div>}
-            {step && (
-              <div className="border-t border-[#EEE9DF] px-8 py-4 text-sm leading-6 text-[#77746B] sm:px-10">
-                {step.status === 'pending' ? step.action : step.outputSummary || step.reasoningSnippet}
-              </div>
-            )}
           </motion.div>
         </AnimatePresence>
       </div>
     </motion.section>
-  );
-}
-
-function StepBrief({ step }: { step: PipelineStep }) {
-  const briefing = getStepBriefing(step);
-  const statusLabel = step.status === 'complete' ? 'What happened' : step.status === 'running' ? 'Now running' : 'Waiting on';
-  const statusValue = step.status === 'complete' ? briefing.happened : step.status === 'running' ? step.reasoningSnippet : step.action;
-
-  return (
-    <div className="mt-6 grid gap-4 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 lg:grid-cols-3">
-      <ArtifactField label={statusLabel} value={statusValue} />
-      <ArtifactField label="Why it matters" value={briefing.why} />
-      <ArtifactField label="Next unlocked" value={step.status === 'complete' ? briefing.next : step.outputSummary || briefing.next} />
-    </div>
   );
 }
 
@@ -1794,7 +1743,7 @@ function StepPendingArtifact({ title, description, progressRail }: { title: stri
   return (
     <StepArtifactFrame eyebrow="Queued" title={title} description={description} icon={<LoaderCircle aria-hidden="true" size={18} />} progressRail={progressRail}>
       <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 text-sm leading-6 text-[#625F57]">
-        The workflow will update this card as soon as provider data arrives.
+        Waiting
       </StepReveal>
     </StepArtifactFrame>
   );
@@ -1803,11 +1752,10 @@ function StepPendingArtifact({ title, description, progressRail }: { title: stri
 function ExtractionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: PipelineRun; step: PipelineStep; progressRail?: ReactNode }) {
   const extracted = pipelineRun.extractedSource;
   const title = getExtractionTitle(pipelineRun, step);
-  const description = extracted ? extracted.domain : step.reasoningSnippet;
   const sourceExcerpt = getSourceExcerpt(pipelineRun);
 
   return (
-    <StepArtifactFrame eyebrow="Read Source" title={title} description={description} step={step} icon={<FileText aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Read Source" title={title} description={extracted ? extracted.domain : formatStepStatus(step.status)} step={step} icon={<FileText aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-3 sm:grid-cols-2">
         <StepReveal>
           <ArtifactField label="Input type" value={looksLikeUrl(pipelineRun.sourceInput) ? 'Readable URL' : 'Pasted source text'} />
@@ -1845,7 +1793,7 @@ function IngestionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: P
   ];
 
   return (
-    <StepArtifactFrame eyebrow="Source Details" title={ingestion.signalName} description="These are the basic facts the market draft will use." step={step} icon={<Globe2 aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Source Details" title={ingestion.signalName} step={step} icon={<Globe2 aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2 lg:grid-cols-3">
         {fields.map(([label, value], index) => (
           <StepReveal key={label} index={index}>
@@ -1943,7 +1891,7 @@ function DraftArtifact({ market, step, progressRail }: { market?: MarketQuestion
   }
 
   return (
-    <StepArtifactFrame eyebrow="Write Market" title={market.question} description="This draft asks about an official outcome, so the answer can be checked later." step={step} icon={<Link aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Write Market" title={market.question} step={step} icon={<Link aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2">
         <StepReveal>
           <Criteria label="YES" value={market.yesCriteria} />
@@ -1981,7 +1929,7 @@ function DecisionArtifact({
   }
 
   return (
-    <StepArtifactFrame eyebrow="Quality Check" title="Market drafts are checked before approval." description="A draft passes only if the wording is clear, evidence-backed, not duplicated, and easy to resolve." step={step} icon={<ListChecks aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Quality Check" title="Market drafts are checked before approval." step={step} icon={<ListChecks aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-5">
         {drafts.map((draft) => {
           const review = reviews.find((item) => item.draftId === draft.id);
@@ -2031,7 +1979,6 @@ function FinalArtifact({
   copied,
   onCopy,
   onOpenFinalArtifact,
-  onNewAnalysis,
   isComplete,
   progressRail,
 }: {
@@ -2040,7 +1987,6 @@ function FinalArtifact({
   copied: boolean;
   onCopy: () => void;
   onOpenFinalArtifact: () => void;
-  onNewAnalysis: () => void;
   isComplete: boolean;
   progressRail?: ReactNode;
 }) {
@@ -2054,9 +2000,6 @@ function FinalArtifact({
     <StepArtifactFrame
       eyebrow={isCommittedTrace(pipelineRun.trace) ? 'Proof Saved' : 'Proof Prepared'}
       title={market.question}
-      description={isCommittedTrace(pipelineRun.trace)
-        ? 'A permanent Arc Testnet proof now points to this final market artifact.'
-        : 'The source and market proof are prepared for review.'}
       step={step}
       icon={<ShieldCheck aria-hidden="true" size={18} />}
       progressRail={progressRail}
@@ -2119,12 +2062,6 @@ function FinalArtifact({
               </span>
             </button>
           )}
-          <button type="button" onClick={onNewAnalysis} className="secondary-button pressable px-4">
-            <span className="inline-flex items-center justify-center gap-2">
-              <RotateCcw aria-hidden="true" size={15} />
-              New analysis
-            </span>
-          </button>
         </div>
       </StepReveal>
     </StepArtifactFrame>
@@ -2385,6 +2322,42 @@ function getStepState(status: PipelineStepStatus): StepState {
   if (status === 'running') return 'active';
   if (status === 'failed') return 'failed';
   return 'pending';
+}
+
+function formatStepStatus(status: PipelineStepStatus): string {
+  if (status === 'complete') return 'Done';
+  if (status === 'running') return 'Running';
+  if (status === 'failed') return 'Blocked';
+  return 'Waiting';
+}
+
+function getRunStateLabel(status: PipelineRun['status']): string {
+  if (status === 'complete' || status === 'trace-committed') return 'Complete';
+  if (status === 'running') return 'Running';
+  if (status === 'failed' || status === 'rejected') return 'Blocked';
+  return 'Ready';
+}
+
+function normalizeSourceText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isEffectivelySameSource(submittedText: string, extractedText: string): boolean {
+  const submitted = normalizeSourceText(submittedText);
+  const extracted = normalizeSourceText(extractedText);
+
+  if (submitted.length < 80 || extracted.length < 80) return submitted === extracted;
+  if (submitted === extracted) return true;
+
+  const shorter = submitted.length < extracted.length ? submitted : extracted;
+  const longer = submitted.length < extracted.length ? extracted : submitted;
+
+  return longer.includes(shorter) && shorter.length / longer.length > 0.72;
 }
 
 function formatMarketForCopy(run: PipelineRun): string {
