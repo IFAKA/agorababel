@@ -1183,14 +1183,14 @@ function getArtifactView({
       const comparison = pipelineRun.liveMarketComparison ?? pipelineRun.analysis?.marketComparison;
 
       if (!comparison) {
-        return createPendingArtifactView(activeStep, 'Checking existing markets for duplicates.');
+        return createPendingArtifactView(activeStep, 'Checking existing betting questions for the same outcome.');
       }
 
       return {
         key: activeStep.id,
         step: activeStep,
-        eyebrow: 'Check Duplicates',
-        title: comparison.noveltyVerdict === 'new-opportunity' ? 'No close duplicate found' : `Duplicate check: ${comparison.noveltyVerdict}`,
+        eyebrow: 'Check Existing Questions',
+        title: comparison.noveltyVerdict === 'new-opportunity' ? 'No overlapping question found' : `Question overlap check: ${comparison.noveltyVerdict}`,
         icon: <ListChecks aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1198,11 +1198,11 @@ function getArtifactView({
               <ArtifactField label="Search status" value={comparison.status} />
             </StepReveal>
             <StepReveal index={1} className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
-              <div className="eyebrow">Similar markets</div>
+              <div className="eyebrow">Similar questions</div>
               <p className="mt-3 text-base leading-7 text-[#292824]">
                 {comparison.similarMarkets.length > 0
                   ? comparison.similarMarkets.map((market) => `${market.title} (${market.similarity})`).join('; ')
-                  : 'No overlapping actor/event markets found in configured sources.'}
+                  : 'No betting questions with the same actor and event found in configured sources.'}
               </p>
             </StepReveal>
           </div>

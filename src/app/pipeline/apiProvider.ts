@@ -417,7 +417,7 @@ function revealStreamArtifact(run: PipelineRun, stage: PipelineStage, artifact: 
       context: {
         englishSummary: String(claim.summary ?? 'Claim extracted.'),
         marketRelevance: 'Medium',
-        relevanceExplanation: 'The main claim has the fields needed for a market. Duplicate checking is still pending.',
+        relevanceExplanation: 'The main claim has the fields needed for a market. Question overlap checking is still pending.',
         evidenceSummary: evidence,
       },
     });
@@ -607,8 +607,8 @@ function outputForStage(analysis: AnalysisResult, stage: PipelineStage, mode: 'r
       return mode === 'summary' ? `${analysis.resolver?.name ?? 'No resolver'} verified.` : analysis.resolver?.verificationEvidence ?? analysis.rejectionReason ?? 'No resolver verified.';
     case 'market-comparison':
       return mode === 'summary'
-        ? `Duplicate check: ${analysis.marketComparison?.noveltyVerdict === 'new-opportunity' ? 'no close duplicate found' : analysis.marketComparison?.noveltyVerdict ?? 'not checked'}.`
-        : analysis.marketComparison?.reasoning ?? 'Duplicate check did not run.';
+        ? `Question overlap check: ${analysis.marketComparison?.noveltyVerdict === 'new-opportunity' ? 'no overlapping question found' : analysis.marketComparison?.noveltyVerdict ?? 'not checked'}.`
+        : analysis.marketComparison?.reasoning ?? 'Question overlap check did not run.';
     case 'market-drafting':
       return mode === 'summary' ? analysis.candidateMarkets[0]?.question ?? 'No candidate market.' : `${analysis.rejectedMarkets.length} rejected alternatives retained.`;
     case 'critic-review':
@@ -732,7 +732,7 @@ function liveOperationLabelForStage(stage: PipelineStage, phase: 'start' | 'note
     'claim-extraction': { start: 'Main claim search started', note: 'Claim fields extracted', complete: 'Main claim checked' },
     'resolver-discovery': { start: 'Official source search started', note: 'Official source search running', complete: 'Official source candidate recorded' },
     'resolver-verification': { start: 'Official source fetch started', note: 'Official source checked', complete: 'Official source verified' },
-    'market-comparison': { start: 'Duplicate search started', note: 'Similarity scan running', complete: 'Duplicate check recorded' },
+    'market-comparison': { start: 'Question overlap search started', note: 'Similarity scan running', complete: 'Question overlap check recorded' },
     'market-drafting': { start: 'Market draft started', note: 'Alternatives staged', complete: 'Market draft accepted' },
     'critic-review': { start: 'Quality checks started', note: 'Quality checks running', complete: 'Quality decision recorded' },
     'circle-wallet': { start: 'Circle wallet check started', note: 'Wallet status fetched', complete: 'Wallet proof ready' },

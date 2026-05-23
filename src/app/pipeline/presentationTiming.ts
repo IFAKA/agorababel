@@ -44,12 +44,12 @@ const stepBriefings: Record<PipelineStep['id'], StepBriefing> = {
   resolver: {
     happened: 'The market now has an official settlement source.',
     why: 'A prediction market needs a source that can decide the outcome without judgment calls.',
-    next: 'The draft can be checked against existing markets before a new one is created.',
+    next: 'The draft can be checked against existing betting questions before a new one is created.',
   },
   comparison: {
-    happened: 'Existing market sources were checked for overlap.',
-    why: 'The workflow avoids publishing redundant markets when a close match already exists.',
-    next: 'A candidate market can be drafted only if the opportunity is still distinct.',
+    happened: 'Existing betting questions were checked for overlap.',
+    why: 'The workflow avoids publishing the same outcome twice when a close match already exists.',
+    next: 'A candidate question can be drafted only if the opportunity is still distinct.',
   },
   'market-creator': {
     happened: 'A YES/NO market draft was written.',

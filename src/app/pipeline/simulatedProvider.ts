@@ -389,7 +389,7 @@ function createDemoMarketComparison(ingestion: SourceAnalysis): NonNullable<Pipe
     status: 'checked',
     similarMarkets: [],
     noveltyVerdict: 'new-opportunity',
-    reasoning: `No overlapping ${ingestion.region} ${ingestion.topic.toLowerCase()} markets were found in the checked market sources.`,
+    reasoning: `No existing betting questions with the same ${ingestion.region} ${ingestion.topic.toLowerCase()} outcome were found.`,
   };
 }
 
@@ -439,7 +439,7 @@ function demoOperationLabelForStep(stepId: PipelineStep['id'], phase: 'start' | 
     context: { start: 'Context summary started', note: 'Evidence summarized', complete: 'Context ready' },
     claim: { start: 'Claim search started', note: 'Claim fields mapped', complete: 'Main claim ready' },
     resolver: { start: 'Official source selected', note: 'Official source checked', complete: 'Official source ready' },
-    comparison: { start: 'Duplicate search started', note: 'Local market index checked', complete: 'Duplicate check ready' },
+    comparison: { start: 'Question overlap search started', note: 'Local question index checked', complete: 'Question overlap check ready' },
     'market-creator': { start: 'Market draft started', note: 'Alternatives generated', complete: 'Accepted draft selected' },
     critic: { start: 'Quality checks started', note: 'Review checks completed', complete: 'Quality decision recorded' },
     circle: { start: 'Wallet record loaded', note: 'Test wallet fields checked', complete: 'Wallet ready' },
@@ -491,7 +491,7 @@ function demoOperationMetadataForStep(
         mode: PREVIEW_MODE,
         sources: 'preview index',
         similar: String(comparison?.similarMarkets.length ?? 0),
-        result: comparison?.noveltyVerdict === 'new-opportunity' ? 'no close duplicate' : comparison?.noveltyVerdict ?? 'pending',
+        result: comparison?.noveltyVerdict === 'new-opportunity' ? 'no overlapping question' : comparison?.noveltyVerdict ?? 'pending',
       };
     case 'market-creator':
       return {
@@ -574,8 +574,8 @@ function runningNotesForStep(step: PipelineStep): string[] {
       ];
     case 'comparison':
       return [
-        'Searching market sources for overlapping questions.',
-        'Deciding whether this would duplicate an existing market.',
+        'Searching existing betting questions for the same outcome.',
+        'Deciding whether this would duplicate an existing betting question.',
       ];
     case 'market-creator':
       return [
@@ -872,9 +872,9 @@ function createPipelineSteps(
     createPipelineStep('extraction', 'Read Source', 'Source Reader', 'Turn the submitted URL or pasted text into readable source material.', 'Source text is prepared for review.', 'Source text is ready with a short excerpt for review.'),
     createPipelineStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', `${ingestion.language} source with ${ingestion.entities.length} actors and a ${defaultDeadline(ingestion)} deadline.`, `${ingestion.topic} in ${ingestion.region}; deadline ${defaultDeadline(ingestion)}.`),
     createPipelineStep('resolver', 'Check Official Source', 'Official Source Checker', 'Find and verify the official page that will decide YES or NO.', createDemoResolver(ingestion).verificationEvidence, `${createDemoResolver(ingestion).name} checked as the official source.`),
-    createPipelineStep('comparison', 'Check Duplicates', 'Market Duplicate Checker', 'Search existing market sources for close matches.', createDemoMarketComparison(ingestion).reasoning, 'Duplicate check result: no close duplicate found.'),
+    createPipelineStep('comparison', 'Check Existing Questions', 'Question Overlap Checker', 'Compare against existing betting questions with the same outcome.', createDemoMarketComparison(ingestion).reasoning, 'Question overlap check result: no overlapping question found.'),
     createPipelineStep('market-creator', 'Write Market', 'Market Writer', 'Write one clear YES/NO market with rules, evidence, and a deadline.', `${drafts.length} market drafts generated; the accepted draft resolves on official action.`, `Drafted ${drafts.length} YES/NO markets including "${acceptedMarket.question}"`),
-    createPipelineStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', `${acceptedCount}/${reviews.length} drafts passed the wording, source, deadline, evidence, and duplicate checks.`, acceptedMarket.criticReasoning),
+    createPipelineStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', `${acceptedCount}/${reviews.length} drafts passed the wording, source, deadline, evidence, and question overlap checks.`, acceptedMarket.criticReasoning),
     createPipelineStep('circle', 'Check Wallet', 'Wallet Checker', 'Check the Circle test wallet used to attach a proof record.', 'Circle test-wallet record is ready for proof attachment.', `Circle test wallet ready at ${DEMO_WALLET_ADDRESS}.`),
     createPipelineStep('settlement', 'Save Proof', 'Proof Saver', 'Save proof of the accepted market on Arc Testnet.', 'Proof hash prepared for the accepted market.', 'Proof prepared for preview review.'),
     createPipelineStep('x402', 'Publish Access', 'Access Publisher', 'Publish access details for the final paid artifact.', 'Access metadata is prepared for the final artifact.', `Access metadata ready for ${acceptedMarket.id}.`),

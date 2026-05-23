@@ -178,9 +178,9 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
       artifact: (value) => value,
     });
     const marketComparison = await atStage('market-comparison', runId, emit, () => compareMarketNovelty(draft), {
-      start: 'checking existing public markets',
-      heartbeat: ['querying market search sources', 'scanning actor and event overlap'],
-      complete: 'duplicate check completed',
+      start: 'checking existing betting questions',
+      heartbeat: ['querying question search sources', 'scanning actor and event overlap'],
+      complete: 'question overlap check completed',
       artifact: (value) => value,
     });
     const candidateMarkets = atStageSync('market-drafting', runId, emit, () => normalizeCandidateMarkets(draft, resolver), {
@@ -192,7 +192,7 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
       }),
     });
     const criticOutcome = atStageSync('critic-review', runId, emit, () => enforceCritic(draft, marketComparison.noveltyVerdict), {
-      start: 'checking wording, deadline, official source, duplicates, and placeholders',
+      start: 'checking wording, deadline, official source, question overlap, and placeholders',
       complete: 'quality decision recorded',
       artifact: (value) => ({
         criticVerdict: value.criticVerdict,

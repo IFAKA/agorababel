@@ -257,14 +257,14 @@ export function MarketScreen({
                         <p className="text-sm leading-6 text-[#625F57]">Source analyzed, but no official decision source was found.</p>
                       )}
                     </ProofPanel>
-                    <ProofPanel title="Duplicate Check">
+                    <ProofPanel title="Question Overlap Check">
                       <p className="text-sm font-semibold text-[#292824]">
                         {analysis.marketComparison?.noveltyVerdict === 'new-opportunity'
-                          ? 'No close duplicate found'
+                          ? 'No overlapping question found'
                           : analysis.marketComparison?.noveltyVerdict ?? 'Not checked'}
                       </p>
-                      <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.marketComparison?.reasoning ?? analysis.rejectionReason ?? 'Duplicate check did not run.'}</p>
-                      <p className="mt-2 text-xs font-medium text-[#77746B]">{analysis.marketComparison?.similarMarkets.length ?? 0} similar markets listed</p>
+                      <p className="mt-2 text-sm leading-6 text-[#625F57]">{analysis.marketComparison?.reasoning ?? analysis.rejectionReason ?? 'Question overlap check did not run.'}</p>
+                      <p className="mt-2 text-xs font-medium text-[#77746B]">{analysis.marketComparison?.similarMarkets.length ?? 0} similar questions listed</p>
                     </ProofPanel>
                     <ProofPanel title="Test Wallet">
                       <p className="text-sm font-semibold text-[#292824]">{analysis.circleAgentWallet.status} / {analysis.circleAgentWallet.blockchain}</p>
