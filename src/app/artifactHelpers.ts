@@ -50,32 +50,6 @@ export function isSocialUrlHost(hostname: string): boolean {
   return socialUrlHosts.some((host) => normalizedHost === host || normalizedHost.endsWith(`.${host}`));
 }
 
-export function getNaiveQuestion(run: PipelineRun): string {
-  const deadline = run.acceptedMarket?.deadline ?? run.candidateMarkets[0]?.deadline ?? 'the deadline';
-  const topic = run.ingestion?.topic.toLowerCase() ?? 'the reported event';
-
-  if (isChileCeolRun(run)) {
-    return 'Will Chile approve the Laguna Verde lithium deal by June 30, 2026?';
-  }
-
-  return `Will ${topic} happen by ${deadline}?`;
-}
-
-export function isChileCeolRun(run: PipelineRun): boolean {
-  const text = [
-    run.sourceInput,
-    run.ingestion?.region,
-    run.ingestion?.topic,
-    run.ingestion?.signalName,
-    run.acceptedMarket?.question,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  return text.includes('ceol') || text.includes('laguna verde') || text.includes('contraloria');
-}
-
 export function isCommittedTrace(trace: PipelineRun['trace']) {
   return trace?.status === 'committed' && Boolean(trace.transactionId?.startsWith('0x')) && Boolean(trace.explorerUrl);
 }

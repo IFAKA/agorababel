@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowRight, Check, Clipboard, Download, ExternalLink, LoaderCircle, LockKeyhole, ReceiptText, Share2, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { createSourceExcerpt, describeTraceForMemo, formatRejectedReason, getNaiveQuestion, isChileCeolRun, isCommittedTrace } from '../../artifactHelpers';
+import { createSourceExcerpt, describeTraceForMemo, formatRejectedReason, isCommittedTrace } from '../../artifactHelpers';
 import { emitProductEvent } from '../../pipeline/apiProvider';
 import type { PipelineRun } from '../../pipeline/types';
 import { pageContainerClassName } from '../pageLayout';
@@ -207,8 +207,6 @@ export function MarketScreen({
                   <p className="text-sm font-medium text-[#77746B]">Source</p>
                   <p className="mt-2 max-w-4xl text-sm leading-6 text-[#625F57]">{createSourceExcerpt(pipelineRun.sourceInput)}</p>
                 </div>
-
-                <ArtifactComparison pipelineRun={pipelineRun} />
 
                 <div className="border-t border-[#E5E1D8] pt-4">
                   <p className="text-sm font-medium text-[#77746B]">Translation & Context</p>
@@ -528,48 +526,6 @@ function formatBalanceVerdict(value: string) {
 
 function FlowStep({ label }: { label: string }) {
   return <div className="min-w-0 rounded border border-[#E5E1D8] bg-white px-3 py-2 text-center [overflow-wrap:anywhere]">{label}</div>;
-}
-
-function ArtifactComparison({ pipelineRun }: { pipelineRun: PipelineRun }) {
-  const ingestion = pipelineRun.ingestion;
-  const market = pipelineRun.acceptedMarket;
-  const rejectedCount = getRejectedMarkets(pipelineRun).length;
-  const artifactItems = [
-    ingestion ? `${ingestion.language} source, ${ingestion.sourceDate}, ${ingestion.region}` : 'Source metadata unavailable',
-    ingestion ? `Actors: ${ingestion.entities.filter((entity) => entity !== ingestion.region).join(', ') || 'Not provided'}` : 'Actors unavailable',
-    market ? `Official source: ${market.resolutionSource}` : 'Official source unavailable',
-    market ? `Accepted deadline: ${market.deadline}` : 'Deadline unavailable',
-    `${rejectedCount} rejected alternatives with reasons`,
-    `Trace status: ${describeTraceForMemo(pipelineRun.trace)}`,
-  ];
-
-  return (
-    <section className="rounded-md border border-[#D8D3C8] bg-white p-4">
-      <div className="eyebrow">Naive output vs AgoraBabel artifact</div>
-      <div className="mt-4 grid gap-3 md:grid-cols-[0.85fr_1.15fr] md:items-start">
-        <div className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3">
-          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#77746B]">Naive output</div>
-          <p className="mt-2 text-base font-semibold leading-7 text-[#292824]">{getNaiveQuestion(pipelineRun)}</p>
-        </div>
-        <div className="rounded-md border border-[#CFC8BA] bg-white p-3">
-          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#171717]">AgoraBabel artifact</div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {artifactItems.map((item) => (
-              <div key={item} className="flex min-w-0 gap-2 text-sm leading-6 text-[#625F57]">
-                <Check aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-[#526247]" />
-                <span className="min-w-0 [overflow-wrap:anywhere]">{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      {isChileCeolRun(pipelineRun) && (
-        <p className="mt-3 text-sm font-medium leading-6 text-[#625F57]">
-          AgoraBabel separates "terms agreed" from "ratification still pending" and resolves only on official government or Contraloria publication.
-        </p>
-      )}
-    </section>
-  );
 }
 
 function getRejectedMarkets(pipelineRun: PipelineRun) {

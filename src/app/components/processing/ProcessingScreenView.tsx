@@ -19,10 +19,8 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  getNaiveQuestion,
   getRunSourceExcerpt as getSourceExcerpt,
   getSubmittedSourceSummary,
-  isChileCeolRun,
   isCommittedTrace,
   looksLikeUrl,
   parseArticleUrl,
@@ -1226,9 +1224,6 @@ function getArtifactView({
               <div className="eyebrow">Evidence summary</div>
               <p className="mt-3 text-base leading-7 text-[#292824]">{context.evidenceSummary}</p>
             </StepReveal>
-            <StepReveal index={2}>
-              <ComparisonMoment pipelineRun={pipelineRun} />
-            </StepReveal>
           </div>
         ),
       };
@@ -1482,11 +1477,8 @@ function getArtifactView({
                 <ArtifactField label="Resolution" value={`${market.deadline} · ${market.resolutionSource}`} />
                 <p className="mt-4 max-w-3xl text-base leading-7 text-[#625F57]">{market.evidenceSummary}</p>
               </StepReveal>
-              <StepReveal index={3} className="sm:col-span-2">
-                <ComparisonMoment pipelineRun={pipelineRun} />
-              </StepReveal>
               {!isCommittedTrace(pipelineRun.trace) && (
-                <StepReveal index={4} className="rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium leading-6 text-[#77746B] sm:col-span-2">
+                <StepReveal index={3} className="rounded-md border border-[#E5E1D8] bg-white p-4 text-sm font-medium leading-6 text-[#77746B] sm:col-span-2">
                   Local trace prepared from the structured outputs. It is useful for demo review, but it is not an Arc Testnet commit proof.
                 </StepReveal>
               )}
@@ -2077,48 +2069,6 @@ function Criteria({ label, value }: { label: string; value: string }) {
       <div className="eyebrow">{label}</div>
       <p className="mt-3 text-base leading-7 text-[#292824]">{value}</p>
     </div>
-  );
-}
-
-function ComparisonMoment({ pipelineRun }: { pipelineRun: PipelineRun }) {
-  const ingestion = pipelineRun.ingestion;
-  const acceptedMarket = pipelineRun.acceptedMarket ?? pipelineRun.candidateMarkets[0];
-  const rejectedCount = pipelineRun.rejectedMarkets.length || Math.max(pipelineRun.candidateMarkets.length - 1, 0);
-  const artifactItems = [
-    ingestion ? `${ingestion.language} source, ${ingestion.sourceDate}, ${ingestion.region}` : 'Source fields pending',
-    ingestion ? `Actors: ${getActors(ingestion.entities)}` : 'Actors pending',
-    acceptedMarket ? `Official source: ${acceptedMarket.resolutionSource}` : 'Official source pending',
-    acceptedMarket ? `Accepted deadline: ${acceptedMarket.deadline}` : 'Deadline pending',
-    `${rejectedCount} rejected alternatives retained`,
-    `Trace status: ${formatTraceStatus(pipelineRun.trace)}`,
-  ];
-
-  return (
-    <section className="rounded-md border border-[#D8D3C8] bg-white p-4">
-      <div className="eyebrow">Naive output vs AgoraBabel artifact</div>
-      <div className="mt-4 grid gap-3 md:grid-cols-[0.85fr_1.15fr] md:items-start">
-        <div className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3">
-          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#77746B]">Naive output</div>
-          <p className="mt-2 text-base font-semibold leading-7 text-[#292824]">{getNaiveQuestion(pipelineRun)}</p>
-        </div>
-        <div className="rounded-md border border-[#CFC8BA] bg-white p-3">
-          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#171717]">AgoraBabel artifact</div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {artifactItems.map((item) => (
-              <div key={item} className="flex min-w-0 gap-2 text-sm leading-6 text-[#625F57]">
-                <Check aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-[#526247]" />
-                <span className="min-w-0 [overflow-wrap:anywhere]">{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      {isChileCeolRun(pipelineRun) && (
-        <p className="mt-3 text-sm font-medium leading-6 text-[#625F57]">
-          The pipeline keeps "terms agreed" separate from "ratification still pending" and resolves only on official government or Contraloria publication.
-        </p>
-      )}
-    </section>
   );
 }
 
