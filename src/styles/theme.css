@@ -327,6 +327,10 @@
     outline-offset: 2px;
   }
 
+  :focus-within {
+    scroll-margin-block: 1.5rem;
+  }
+
   [id] {
     scroll-margin-top: 1.5rem;
   }
@@ -341,14 +345,14 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.14);
+    background: color-mix(in srgb, var(--text-subtle) 26%, transparent);
     border: 3px solid transparent;
     border-radius: 999px;
     background-clip: content-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.22);
+    background-color: color-mix(in srgb, var(--text-subtle) 42%, transparent);
   }
 }
 
@@ -358,9 +362,9 @@
     left: max(1rem, env(safe-area-inset-left));
     top: max(1rem, env(safe-area-inset-top));
     z-index: 100;
-    border: 1px solid rgba(182, 150, 104, 0.55);
+    border: 1px solid var(--line-strong);
     border-radius: 6px;
-    background: #242429;
+    background: var(--surface-2);
     color: var(--text-strong);
     padding: 0.6rem 0.75rem;
     font-size: 0.875rem;
@@ -525,6 +529,10 @@
       transform 140ms var(--ease-out);
   }
 
+  .pressable:hover:not(:disabled) {
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45) inset;
+  }
+
   .pressable:active:not(:disabled) {
     transform: scale(0.98);
   }
@@ -544,12 +552,16 @@
     color: var(--primary-foreground);
     background: var(--primary);
     border: 1px solid var(--primary);
-    box-shadow: 0 10px 24px rgba(29, 28, 24, 0.12);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.14) inset,
+      0 10px 24px rgba(29, 28, 24, 0.12);
   }
 
   .primary-button:hover {
     background: var(--text-strong);
-    box-shadow: 0 12px 28px rgba(29, 28, 24, 0.16);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.16) inset,
+      0 12px 28px rgba(29, 28, 24, 0.16);
   }
 
   .secondary-button {

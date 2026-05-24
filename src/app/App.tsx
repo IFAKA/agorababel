@@ -106,7 +106,7 @@ function getSubmissionTitle(source: string) {
 
 function getSubmittedSourceSummary(source: string) {
   const compact = source.trim().replace(/\s+/g, ' ');
-  return compact.length > 118 ? `${compact.slice(0, 118)}...` : compact;
+  return compact.length > 118 ? `${compact.slice(0, 118)}…` : compact;
 }
 
 function getPathForScreen(screen: Screen) {

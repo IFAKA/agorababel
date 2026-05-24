@@ -7,12 +7,34 @@ export const MIN_OPERATION_DWELL_MS = 1800;
 export const MAX_OPERATION_DWELL_MS = 6200;
 export const MIN_COMPLETED_STEP_DWELL_MS = 5600;
 export const MAX_COMPLETED_STEP_DWELL_MS = 11600;
+export const LOADING_SHOW_DELAY_MS = 200;
+export const LOADING_MIN_VISIBLE_MS = 450;
 
 export type PresentedStepState = {
   index: number;
   status: PipelineStepStatus;
   since: number;
 };
+
+export function getCallLoadingTransitionDelay({
+  currentStatus,
+  nextStatus,
+  elapsedMs,
+}: {
+  currentStatus: PipelineStepStatus;
+  nextStatus: PipelineStepStatus;
+  elapsedMs: number;
+}): number {
+  if (currentStatus !== 'running' && nextStatus === 'running') {
+    return LOADING_SHOW_DELAY_MS;
+  }
+
+  if (currentStatus === 'running' && nextStatus !== 'running') {
+    return Math.max(LOADING_MIN_VISIBLE_MS - elapsedMs, 0);
+  }
+
+  return 0;
+}
 
 export type StepBriefing = {
   happened: string;

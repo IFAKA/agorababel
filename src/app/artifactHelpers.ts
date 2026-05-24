@@ -20,7 +20,7 @@ const socialUrlHosts = ['facebook.com', 'instagram.com', 'linkedin.com', 'reddit
 
 export function createSourceExcerpt(sourceInput: string, maxLength = 360) {
   const trimmed = sourceInput.trim().replace(/\s+/g, ' ');
-  return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}...` : trimmed || 'No source text available.';
+  return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}…` : trimmed || 'No source text available.';
 }
 
 export function getRunSourceExcerpt(run: PipelineRun): string {

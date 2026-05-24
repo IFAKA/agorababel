@@ -2,7 +2,7 @@ import { createSourceExcerpt, isCommittedTrace, looksLikeUrl } from '../artifact
 import type { PipelineRun, PipelineStep, SourceAnalysis } from './types';
 
 export function getArtifactReadableText(run: PipelineRun, step?: PipelineStep, isComplete = run.status === 'complete'): string {
-  if (!step) return normalizeReadableText(['Queued', 'Analysis is preparing.', 'Waiting']);
+  if (!step) return normalizeReadableText(['Queued', 'Analysis is preparing.', 'Waiting…']);
 
   switch (step.id) {
     case 'extraction': {
@@ -230,8 +230,8 @@ export function getArtifactReadableText(run: PipelineRun, step?: PipelineStep, i
         disabled ? 'Paid Access Disabled' : 'Publish Access',
         market.question,
         'Validated artifact',
-        run.analyzedInMs !== undefined ? `Analyzed in ${(run.analyzedInMs / 1000).toFixed(1)}s` : undefined,
-        isComplete ? 'Copy Open artifact' : undefined,
+        run.analyzedInMs !== undefined ? `Analyzed in ${(run.analyzedInMs / 1000).toFixed(1)} s` : undefined,
+        isComplete ? 'Copy Open Artifact' : undefined,
         'YES',
         market.yesCriteria,
         'NO',
@@ -285,7 +285,7 @@ function getSubmittedSourceExcerpt(run: PipelineRun): string {
 
 function getExtractionTitle(run: PipelineRun, step: PipelineStep): string {
   if (run.extractedSource) return looksLikeUrl(run.sourceInput) ? 'Article source prepared.' : 'Source text prepared.';
-  if (looksLikeUrl(run.sourceInput)) return step.status === 'complete' ? 'Article source prepared.' : 'Extracting article...';
+  if (looksLikeUrl(run.sourceInput)) return step.status === 'complete' ? 'Article source prepared.' : 'Extracting article…';
   return step.status === 'complete' ? 'Source text prepared.' : 'Preparing pasted source.';
 }
 

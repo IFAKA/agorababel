@@ -1,6 +1,7 @@
 import { ArrowLeft, ArrowRight, Check, Clipboard, Download, ExternalLink, LoaderCircle, LockKeyhole, ReceiptText, Share2, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createSourceExcerpt, describeTraceForMemo, formatRejectedReason, isCommittedTrace } from '../../artifactHelpers';
+import { useCallLoadingPresentation } from '../../hooks/useCallLoadingPresentation';
 import { emitProductEvent } from '../../pipeline/apiProvider';
 import type { PipelineRun } from '../../pipeline/types';
 import { pageContainerClassName } from '../pageLayout';
@@ -16,7 +17,9 @@ export function MarketScreen({
 }) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
   const [unlockState, setUnlockState] = useState<X402UnlockState>({ status: 'idle' });
+  const visibleUnlockState = useCallLoadingPresentation(unlockState, isX402UnlockLoading, getX402UnlockStateKey);
   const market = pipelineRun.acceptedMarket;
   const ingestion = pipelineRun.ingestion;
   const context = pipelineRun.context;
@@ -58,10 +61,13 @@ export function MarketScreen({
     const url = window.location.href;
     if (navigator.share) {
       await navigator.share({ title: market?.question ?? 'AgoraBabel market artifact', url });
+      setShareStatus('Share sheet opened.');
     } else {
       await navigator.clipboard.writeText(url);
+      setShareStatus('Artifact link copied.');
     }
     emitProductEvent('artifact_shared', { artifactId: market?.id, runId: pipelineRun.id });
+    window.setTimeout(() => setShareStatus(null), 1800);
   };
 
   const handleFeedback = (value: string) => {
@@ -137,6 +143,9 @@ export function MarketScreen({
 
   return (
     <main className="h-full w-full overflow-y-auto bg-[#F7F6F1] text-[#191A1C]">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {copied ? 'Operator memo copied.' : shareStatus ?? (feedback ? `Feedback recorded: ${feedback}.` : '')}
+      </p>
       <div className={pageContainerClassName}>
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E3DED3] pb-4">
             <div className="flex min-w-0 items-start gap-3">
@@ -150,30 +159,24 @@ export function MarketScreen({
                 </div>
                 {pipelineRun.analyzedInMs !== undefined && (
                   <div className="mt-1 text-sm font-medium text-[#77746B]">
-                    Analyzed in {(pipelineRun.analyzedInMs / 1000).toFixed(1)}s
+                    <span className="tabular-nums">Analyzed in {(pipelineRun.analyzedInMs / 1000).toFixed(1)} s</span>
                   </div>
                 )}
               </div>
             </div>
             {operatorMemo && (
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={handleCopyMemo} className="primary-button pressable px-4">
-                  <span className="inline-flex items-center justify-center gap-2">
-                    {copied ? <Check aria-hidden="true" size={15} /> : <Clipboard aria-hidden="true" size={15} />}
-                    {copied ? 'Copied' : 'Copy'}
-                  </span>
+                <button type="button" onClick={handleCopyMemo} className="primary-button pressable inline-flex items-center justify-center gap-2 px-4">
+                  {copied ? <Check aria-hidden="true" size={15} /> : <Clipboard aria-hidden="true" size={15} />}
+                  {copied ? 'Copied' : 'Copy Memo'}
                 </button>
-                <button type="button" onClick={handleDownloadMemo} className="secondary-button pressable px-4">
-                  <span className="inline-flex items-center justify-center gap-2">
-                    <Download aria-hidden="true" size={15} />
-                    Markdown
-                  </span>
+                <button type="button" onClick={handleDownloadMemo} className="secondary-button pressable inline-flex items-center justify-center gap-2 px-4">
+                  <Download aria-hidden="true" size={15} />
+                  Download Markdown
                 </button>
-                <button type="button" onClick={handleShare} className="secondary-button pressable px-4">
-                  <span className="inline-flex items-center justify-center gap-2">
-                    <Share2 aria-hidden="true" size={15} />
-                    Share
-                  </span>
+                <button type="button" onClick={handleShare} className="secondary-button pressable inline-flex items-center justify-center gap-2 px-4">
+                  <Share2 aria-hidden="true" size={15} />
+                  Share
                 </button>
               </div>
             )}
@@ -181,48 +184,47 @@ export function MarketScreen({
 
           {!market || !context ? (
             <section className="artifact-card p-8 sm:p-12">
-              <div className="eyebrow">No persisted artifact</div>
+              <div className="eyebrow">No Persisted Artifact</div>
               <h1 className="mt-5 max-w-3xl text-3xl font-semibold leading-tight tracking-normal text-[#171717] sm:text-5xl">
-                No persisted artifact found for this route.
+                No Persisted Artifact Found for This Route.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-8 text-[#625F57]">
                 Complete an analysis before opening an artifact route.
               </p>
             </section>
           ) : (
-            <article className="artifact-card min-w-0 overflow-hidden">
-              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 p-5 sm:p-6">
-                <section className="grid w-full min-w-0 max-w-full gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm font-semibold text-[#292824] sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:items-center">
-                  <FlowStep label="Source" />
-                  <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
-                  <FlowStep label="Candidate Markets Rejected" />
-                  <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
-                  <FlowStep label="Final Market" />
-                  <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
-                  <FlowStep label="Audit Trace" />
-                </section>
+            <article className="artifact-card grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 overflow-hidden p-5 sm:p-6">
+              <section className="grid w-full min-w-0 max-w-full gap-3 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-3 text-sm font-semibold text-[#292824] sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:items-center">
+                <FlowStep label="Source" />
+                <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
+                <FlowStep label="Candidate Markets Rejected" />
+                <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
+                <FlowStep label="Final Market" />
+                <ArrowRight aria-hidden="true" className="hidden text-[#8B877D] sm:block" size={15} />
+                <FlowStep label="Audit Trace" />
+              </section>
 
-                <div>
-                  <p className="text-sm font-medium text-[#77746B]">Source</p>
-                  <p className="mt-2 max-w-4xl text-sm leading-6 text-[#625F57]">{createSourceExcerpt(pipelineRun.sourceInput)}</p>
-                </div>
+              <div>
+                <p className="text-sm font-medium text-[#77746B]">Source</p>
+                <p className="mt-2 max-w-4xl text-sm leading-6 text-[#625F57]">{createSourceExcerpt(pipelineRun.sourceInput)}</p>
+              </div>
 
-                <div className="border-t border-[#E5E1D8] pt-4">
-                  <p className="text-sm font-medium text-[#77746B]">Translation & Context</p>
-                  <p className="mt-2 max-w-4xl text-sm leading-6 text-[#625F57]">{context.englishSummary}</p>
-                </div>
+              <div className="border-t border-[#E5E1D8] pt-4">
+                <p className="text-sm font-medium text-[#77746B]">Translation & Context</p>
+                <p className="mt-2 max-w-4xl text-sm leading-6 text-[#625F57]">{context.englishSummary}</p>
+              </div>
 
-                <div className="border-t border-[#E5E1D8] pt-4">
-                  <p className="text-sm font-medium text-[#77746B]">Final Market</p>
-                  <h1 className="mt-3 max-w-4xl text-2xl font-semibold leading-tight tracking-normal text-[#171717] sm:text-3xl">
-                    {market.question}
-                  </h1>
-                </div>
+              <div className="border-t border-[#E5E1D8] pt-4">
+                <p className="text-sm font-medium text-[#77746B]">Final Market</p>
+                <h1 className="mt-3 max-w-4xl text-2xl font-semibold leading-tight tracking-normal text-[#171717] sm:text-3xl">
+                  {market.question}
+                </h1>
+              </div>
 
-                <section className="grid gap-4 border-t border-[#E5E1D8] pt-4 md:grid-cols-2">
-                  <CriteriaBlock label="YES criteria" value={market.yesCriteria} />
-                  <CriteriaBlock label="NO criteria" value={market.noCriteria} />
-                </section>
+              <section className="grid gap-4 border-t border-[#E5E1D8] pt-4 md:grid-cols-2">
+                <CriteriaBlock label="YES criteria" value={market.yesCriteria} />
+                <CriteriaBlock label="NO criteria" value={market.noCriteria} />
+              </section>
 
                 <MarketBalancePanel marketBalance={market.marketBalance} />
 
@@ -295,7 +297,12 @@ export function MarketScreen({
                       </a>
                     )}
                   </ProofPanel>
-                  <X402Panel x402={pipelineRun.x402} unlockState={unlockState} onUnlock={handleUnlock} />
+                  <X402Panel
+                    x402={pipelineRun.x402}
+                    unlockState={visibleUnlockState}
+                    isUnlocking={isX402UnlockLoading(unlockState)}
+                    onUnlock={handleUnlock}
+                  />
                 </section>
 
                 <section className="border-t border-[#E5E1D8] pt-4">
@@ -328,7 +335,6 @@ export function MarketScreen({
                     ))}
                   </div>
                 </section>
-              </div>
             </article>
           )}
       </div>
@@ -376,13 +382,23 @@ type X402UnlockState =
   | { status: 'failed'; requiredProof?: X402RequiredProof | null; error?: string }
   | { status: 'disabled' };
 
+function isX402UnlockLoading(state: X402UnlockState): boolean {
+  return state.status === 'checking' || state.status === 'paying';
+}
+
+function getX402UnlockStateKey(state: X402UnlockState): string {
+  return state.status;
+}
+
 function X402Panel({
   x402,
   unlockState,
+  isUnlocking,
   onUnlock,
 }: {
   x402: PipelineRun['x402'];
   unlockState: X402UnlockState;
+  isUnlocking: boolean;
   onUnlock: () => void;
 }) {
   if (!x402 || x402.status === 'disabled') {
@@ -417,22 +433,20 @@ function X402Panel({
       <button
         type="button"
         onClick={onUnlock}
-        disabled={unlockState.status === 'checking' || unlockState.status === 'paying'}
-        className="secondary-button pressable mt-3 px-4 disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={isUnlocking}
+        className="secondary-button pressable mt-3 inline-flex items-center justify-center gap-2 px-4 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        <span className="inline-flex items-center justify-center gap-2">
-          {unlockState.status === 'checking' || unlockState.status === 'paying'
-            ? <LoaderCircle aria-hidden="true" className="animate-spin" size={15} />
-            : <WalletCards aria-hidden="true" size={15} />}
-          Pay with buyer agent
-        </span>
+        {unlockState.status === 'checking' || unlockState.status === 'paying'
+          ? <LoaderCircle aria-hidden="true" className="animate-spin" size={15} />
+          : <WalletCards aria-hidden="true" size={15} />}
+        Pay with Buyer Agent
       </button>
-      {unlockState.status === 'checking' && <p className="mt-2 text-sm font-medium text-[#625F57]">Checking unpaid endpoint for a 402 challenge...</p>}
+      {unlockState.status === 'checking' && <p className="mt-2 text-sm font-medium text-[#625F57]">Checking unpaid endpoint for a 402 challenge…</p>}
       {unlockState.status === 'paying' && (
         <div className="mt-3 rounded border border-[#E5E1D8] bg-white p-3">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8C3D32]">402 Required Proof</p>
           <p className="mt-2 text-sm leading-6 text-[#625F57]">
-            The intelligence endpoint returned Payment Required. The buyer agent is signing and settling through Circle Gateway.
+            The intelligence endpoint returned payment required. The buyer agent is signing and settling through Circle Gateway.
           </p>
         </div>
       )}
@@ -530,7 +544,7 @@ function ProbabilityTile({ label, value, tone }: { label: string; value: number;
   return (
     <div className="rounded-md border border-[#D8D3C8] bg-white p-3">
       <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#77746B]">{label}</div>
-      <div className="mt-2 text-3xl font-semibold tracking-normal text-[#171717]">{value}%</div>
+      <div className="mt-2 text-3xl font-semibold tracking-normal tabular-nums text-[#171717]">{value}%</div>
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#ECE7DC]">
         <div className={`h-full rounded-full ${barClassName}`} style={{ width: `${value}%` }} />
       </div>

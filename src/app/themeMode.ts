@@ -5,6 +5,10 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export const themeModeStorageKey = 'agorababel:themeMode';
 
 const systemDarkQuery = '(prefers-color-scheme: dark)';
+const themeColorByMode = {
+  light: '#F7F6F1',
+  dark: '#10100E',
+} as const;
 
 function getStoredThemeMode(): ThemeMode {
   try {
@@ -23,6 +27,7 @@ function applyThemeMode(mode: ThemeMode) {
   const resolvedMode = mode === 'system' ? getSystemTheme() : mode;
   document.documentElement.classList.toggle('dark', resolvedMode === 'dark');
   document.documentElement.style.colorScheme = resolvedMode;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColorByMode[resolvedMode]);
 }
 
 export function useThemeMode() {

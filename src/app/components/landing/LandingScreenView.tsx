@@ -153,17 +153,13 @@ export function LandingScreen({
                 Convert local-language news into verified market drafts with resolution criteria, source-backed analysis, and audit trails.
               </motion.p>
               <motion.div variants={reduceMotion ? undefined : landingItemMotion} className="mt-7 flex flex-wrap gap-2">
-                <button type="button" onClick={onAnalyzeSource} className="primary-button pressable px-5">
-                  <span className="inline-flex items-center justify-center gap-2">
-                    Analyze source
-                    <ArrowRight aria-hidden="true" size={15} />
-                  </span>
+                <button type="button" onClick={onAnalyzeSource} className="primary-button pressable inline-flex items-center justify-center gap-2 px-5">
+                  Analyze Source
+                  <ArrowRight aria-hidden="true" size={15} />
                 </button>
-                <button type="button" onClick={onRunSampleArticle} className="secondary-button pressable px-5">
-                  <span className="inline-flex items-center justify-center gap-2">
-                    <Play aria-hidden="true" size={15} />
-                    Run sample analysis
-                  </span>
+                <button type="button" onClick={onRunSampleArticle} className="secondary-button pressable inline-flex items-center justify-center gap-2 px-5">
+                  <Play aria-hidden="true" size={15} />
+                  Run Sample Analysis
                 </button>
               </motion.div>
             </motion.div>
@@ -343,29 +339,27 @@ function MicrodemoCard({ reduceMotion }: { reduceMotion: boolean | null }) {
       variants={reduceMotion ? undefined : landingItemMotion}
       className="w-full self-start overflow-hidden rounded-lg border border-[#DEDBD2] bg-white shadow-[0_24px_70px_rgba(29,28,24,0.08)] lg:mt-10"
     >
-      <div className="border-b border-[#ECE8DF] px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8A877D]">Live preview</div>
-            <div className="mt-1 text-sm font-medium text-[#242424]">Source to market artifact</div>
-          </div>
-          <button
-            type="button"
-            onClick={resetPreview}
-            className="grid size-8 shrink-0 place-items-center rounded-full bg-[#F1EFE7] text-[#5F5C53] hover:bg-[#E8E4DA] focus:outline-none focus:ring-2 focus:ring-[#B67332]/35"
-            aria-label={statusLabel}
-            title={statusLabel}
-          >
-            <motion.span
-              aria-hidden="true"
-              animate={isRunning && !hasInteracted && !reduceMotion ? { rotate: 360 } : { rotate: 0 }}
-              transition={{ duration: 1.2, repeat: isRunning && !hasInteracted && !reduceMotion ? Infinity : 0, ease: 'linear' }}
-              className="grid size-4 place-items-center"
-            >
-              <StatusIcon size={15} />
-            </motion.span>
-          </button>
+      <div className="flex items-center justify-between gap-3 border-b border-[#ECE8DF] px-4 py-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8A877D]">Live Preview</div>
+          <div className="mt-1 text-sm font-medium text-[#242424]">Source to market artifact</div>
         </div>
+        <button
+          type="button"
+          onClick={resetPreview}
+          className="grid size-8 shrink-0 place-items-center rounded-full bg-[#F1EFE7] text-[#5F5C53] hover:bg-[#E8E4DA] focus:outline-none focus:ring-2 focus:ring-[#B67332]/35"
+          aria-label={statusLabel}
+          title={statusLabel}
+        >
+          <motion.span
+            aria-hidden="true"
+            animate={isRunning && !hasInteracted && !reduceMotion ? { rotate: 360 } : { rotate: 0 }}
+            transition={{ duration: 1.2, repeat: isRunning && !hasInteracted && !reduceMotion ? Infinity : 0, ease: 'linear' }}
+            className="grid size-4 place-items-center"
+          >
+            <StatusIcon size={15} />
+          </motion.span>
+        </button>
       </div>
 
       <LayoutGroup>
@@ -385,7 +379,7 @@ function MicrodemoCard({ reduceMotion }: { reduceMotion: boolean | null }) {
               <FileText aria-hidden="true" size={15} />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8A877D]">Source snippet</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8A877D]">Source Snippet</div>
               <div className="truncate text-sm font-semibold text-[#252521]">Local-news claim detected</div>
             </div>
             <span className="shrink-0 rounded-full bg-[#F1EFE7] px-2 py-0.5 text-xs font-medium text-[#6B6962]">01</span>
@@ -562,7 +556,7 @@ function MicrodemoCard({ reduceMotion }: { reduceMotion: boolean | null }) {
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#C6C0B5]">Market artifact</div>
-              <div className="truncate text-sm font-semibold text-white">Resolved question with criteria</div>
+              <div className="truncate text-sm font-semibold text-white">Resolved Question with Criteria</div>
             </div>
             <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-[#F4F1EA]">final</span>
           </button>

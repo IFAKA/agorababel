@@ -5,6 +5,7 @@ import {
   getCompactOperationDwellMs,
   getCompactOperationReadableText,
   getCompletedStepDwellMs,
+  getCallLoadingTransitionDelay,
   getGatedPresentationTarget,
   getOneStepPresentationTarget,
   getOperationDwellMs,
@@ -13,6 +14,8 @@ import {
   getStepPresentationText,
   MAX_COMPLETED_STEP_DWELL_MS,
   MAX_OPERATION_DWELL_MS,
+  LOADING_MIN_VISIBLE_MS,
+  LOADING_SHOW_DELAY_MS,
   MIN_COMPLETED_STEP_DWELL_MS,
   MIN_OPERATION_DWELL_MS,
   type PresentedStepState,
@@ -37,6 +40,44 @@ test('operation readable text includes visible row content and metadata only', (
   assert.match(readableText, /Checking official host response/);
   assert.match(readableText, /response Code 200/);
   assert.doesNotMatch(readableText, /simulated/);
+});
+
+test('call loading timing delays showing and preserves visible loading states', () => {
+  assert.equal(
+    getCallLoadingTransitionDelay({
+      currentStatus: 'pending',
+      nextStatus: 'running',
+      elapsedMs: 0,
+    }),
+    LOADING_SHOW_DELAY_MS,
+  );
+
+  assert.equal(
+    getCallLoadingTransitionDelay({
+      currentStatus: 'complete',
+      nextStatus: 'running',
+      elapsedMs: 0,
+    }),
+    LOADING_SHOW_DELAY_MS,
+  );
+
+  assert.equal(
+    getCallLoadingTransitionDelay({
+      currentStatus: 'running',
+      nextStatus: 'complete',
+      elapsedMs: 200,
+    }),
+    LOADING_MIN_VISIBLE_MS - 200,
+  );
+
+  assert.equal(
+    getCallLoadingTransitionDelay({
+      currentStatus: 'running',
+      nextStatus: 'failed',
+      elapsedMs: LOADING_MIN_VISIBLE_MS + 1,
+    }),
+    0,
+  );
 });
 
 test('compact operation readable text matches collapsed substep rows', () => {

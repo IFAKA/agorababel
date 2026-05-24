@@ -28,11 +28,13 @@ import {
 import { pipelineStepDescriptions as stepDescriptions, pipelineStepLabels as stepLabels } from '../../pipeline/stages';
 import {
   areStepOperationsReadyToAdvance,
+  getCallLoadingTransitionDelay,
   getGatedPresentationTarget,
   getOneStepPresentationTarget,
   getStepDwellMs,
   type PresentedStepState,
 } from '../../pipeline/presentationTiming';
+import { useCallLoadingPresentation } from '../../hooks/useCallLoadingPresentation';
 import { getArtifactReadableText } from '../../pipeline/artifactReadableText';
 import type { CriticVerdict, MarketQuestion, PipelineRun, PipelineStep, PipelineStepStatus, SourceAnalysis } from '../../pipeline/types';
 import { pageContainerClassName } from '../pageLayout';
@@ -110,9 +112,25 @@ const stepContentMotion = {
   }),
 };
 
-const MIN_STEP_PROCESSING_MS = 850;
-const MIN_FAILURE_PROCESSING_MS = 1300;
 const MIN_PASTED_SOURCE_LENGTH = 120;
+const workflowStepUrlParam = 'step';
+
+function getInitialSelectedStepId(): ProgressStepId | null {
+  const value = new URLSearchParams(window.location.search).get(workflowStepUrlParam);
+  return value === 'source' ? 'source' : value as ProgressStepId | null;
+}
+
+function replaceWorkflowStepUrl(stepId: ProgressStepId | null) {
+  if (window.location.pathname.replace(/\/$/, '') !== '/create') return;
+
+  const url = new URL(window.location.href);
+  if (stepId) {
+    url.searchParams.set(workflowStepUrlParam, stepId);
+  } else {
+    url.searchParams.delete(workflowStepUrlParam);
+  }
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
 
 export function ProcessingScreen({
   sourceText,
@@ -137,7 +155,7 @@ export function ProcessingScreen({
 }) {
   const [copied, setCopied] = useState(false);
   const [errorCopied, setErrorCopied] = useState(false);
-  const [selectedStepId, setSelectedStepId] = useState<ProgressStepId | null>(null);
+  const [selectedStepId, setSelectedStepId] = useState<ProgressStepId | null>(() => getInitialSelectedStepId());
   const [presentedStep, setPresentedStep] = useState<PresentedStepState>({ index: 0, status: 'pending', since: Date.now() });
   const reduceMotion = useReducedMotion();
   const hasStarted = runId > 0;
@@ -163,6 +181,9 @@ export function ProcessingScreen({
   const isComplete = pipelineRun.status === 'complete';
   const isRunning = pipelineRun.status === 'running';
   const sourceReadiness = getSourceReadiness(sourceText, isRunning);
+  const statusAnnouncement = hasStarted
+    ? `${pipelineRun.status}. ${displayedStep ? `${stepLabels[displayedStep.id]} is ${formatStepStatus(displayedStep.status)}.` : 'Preparing analysis.'}`
+    : sourceReadiness.message;
   const progressPipelineSteps = presentedSteps;
   const progressSteps = useMemo<ProgressStep[]>(() => [
     {
@@ -181,6 +202,13 @@ export function ProcessingScreen({
     })),
   ], [hasStarted, progressPipelineSteps]);
   const selectedProgressStepId: ProgressStepId | undefined = selectedStepId ?? (!hasStarted ? 'source' : displayedStep?.id);
+
+  useEffect(() => {
+    if (selectedStepId && !progressSteps.some((step) => step.id === selectedStepId)) {
+      setSelectedStepId(null);
+    }
+  }, [progressSteps, selectedStepId]);
+
   const handleSelectProgressStep = (stepId: ProgressStepId) => {
     if (stepId === 'source') {
       setSelectedStepId('source');
@@ -203,9 +231,22 @@ export function ProcessingScreen({
   useEffect(() => {
     setCopied(false);
     setErrorCopied(false);
-    setSelectedStepId(null);
-    setPresentedStep({ index: 0, status: runId > 0 ? 'running' : 'pending', since: Date.now() });
+    setSelectedStepId(getInitialSelectedStepId());
+    setPresentedStep({ index: 0, status: 'pending', since: Date.now() });
   }, [pipelineRun.id, runId]);
+
+  useEffect(() => {
+    replaceWorkflowStepUrl(selectedStepId);
+  }, [selectedStepId]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setSelectedStepId(getInitialSelectedStepId());
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   useEffect(() => {
     previousDisplayedStepIndexRef.current = displayedStepIndex;
@@ -220,9 +261,25 @@ export function ProcessingScreen({
       setPresentedStep({ index, status, since: Date.now() });
     };
 
+    const schedulePresented = (index: number, status: PipelineStepStatus) => {
+      const delayMs = getCallLoadingTransitionDelay({
+        currentStatus: presentedStep.status,
+        nextStatus: status,
+        elapsedMs: Date.now() - presentedStep.since,
+      });
+
+      if (delayMs <= 0) {
+        setPresented(index, status);
+        return undefined;
+      }
+
+      const timeout = window.setTimeout(() => setPresented(index, status), delayMs);
+      return () => window.clearTimeout(timeout);
+    };
+
     if (isComplete && pipelineRun.acceptedMarket && pipelineRun.steps[target.index]?.id === 'x402') {
       if (presentedStep.index !== target.index || presentedStep.status !== 'complete') {
-        setPresented(target.index, 'complete');
+        return schedulePresented(target.index, 'complete');
       }
       return;
     }
@@ -231,8 +288,7 @@ export function ProcessingScreen({
       const currentRawStep = pipelineRun.steps[presentedStep.index];
 
       if (currentRawStep?.status === 'complete' && areStepOperationsReadyToAdvance(pipelineRun, currentRawStep.id)) {
-        setPresented(presentedStep.index, 'complete');
-        return;
+        return schedulePresented(presentedStep.index, 'complete');
       }
     }
 
@@ -255,7 +311,7 @@ export function ProcessingScreen({
       const nextTarget = target.index > presentedStep.index
         ? getOneStepPresentationTarget(pipelineRun, presentedStep, target)
         : target;
-      setPresented(nextTarget.index, nextTarget.status === 'pending' ? 'running' : nextTarget.status);
+      return schedulePresented(nextTarget.index, nextTarget.status === 'pending' ? 'running' : nextTarget.status);
     }
   }, [hasStarted, isComplete, pipelineRun, presentedStep]);
 
@@ -277,6 +333,7 @@ export function ProcessingScreen({
 
   return (
     <main className="h-full w-full overflow-y-auto bg-[#F7F6F1] text-[#191A1C]">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">{statusAnnouncement}</p>
       <section className={`${pageContainerClassName} max-w-[92rem] lg:grid-cols-[21rem_minmax(0,1fr)] xl:grid-cols-[22.5rem_minmax(0,1fr)]`}>
         <WorkflowSidebar
           steps={progressSteps}
@@ -323,8 +380,11 @@ function SourceInput({
   sourceReadiness: SourceReadiness;
   variant?: 'panel' | 'embedded';
 }) {
+  const readinessMessageRef = useRef<HTMLParagraphElement>(null);
   const charactersRemaining = Math.max(MIN_PASTED_SOURCE_LENGTH - sourceText.trim().length, 0);
   const wrapperClassName = variant === 'embedded' ? 'mt-8 border-t border-[#E5E1D8] pt-6' : 'panel p-4';
+  const isRunning = sourceReadiness.tone === 'running';
+  const showRunning = useCallLoadingPresentation(isRunning, Boolean, (state) => state ? 'running' : 'idle');
 
   return (
     <section className={wrapperClassName}>
@@ -333,7 +393,7 @@ function SourceInput({
           Source
         </label>
         {!looksLikeUrl(sourceText) && charactersRemaining > 0 && (
-          <span className="text-xs font-medium text-[#8B877D]">{charactersRemaining} more chars</span>
+          <span className="text-xs font-medium tabular-nums text-[#8B877D]">{charactersRemaining} more chars</span>
         )}
       </div>
       <textarea
@@ -359,10 +419,13 @@ function SourceInput({
             ? 'border-[#C58778] focus:border-[#8C3D32]'
             : 'border-[#E0DCD2] focus:border-[#171717]'
         }`}
-        placeholder="Paste article text or URL in any language."
+        placeholder="Paste article text or URL in any language…"
       />
       <p
         id="source-readiness-message"
+        ref={readinessMessageRef}
+        tabIndex={-1}
+        aria-live="polite"
         className={`mt-3 text-sm leading-6 ${
           sourceReadiness.tone === 'ready'
             ? 'text-[#526247]'
@@ -376,15 +439,19 @@ function SourceInput({
       <button
         type="button"
         onClick={() => {
-          if (sourceReadiness.canRun) onRunPipeline(sourceText);
+          if (sourceReadiness.canRun) {
+            onRunPipeline(sourceText);
+            return;
+          }
+
+          readinessMessageRef.current?.focus({ preventScroll: true });
         }}
-        disabled={!sourceReadiness.canRun}
-        className="primary-button pressable mt-4 w-full px-5 disabled:cursor-not-allowed disabled:opacity-45"
+        disabled={isRunning}
+        aria-disabled={!sourceReadiness.canRun}
+        className="primary-button pressable mt-4 inline-flex w-full items-center justify-center gap-2 px-5 aria-disabled:opacity-70 disabled:cursor-wait disabled:opacity-70"
       >
-        <span className="inline-flex items-center justify-center gap-2">
-          <Play aria-hidden="true" size={15} />
-          Run analysis
-        </span>
+        {showRunning ? <LoaderCircle aria-hidden="true" className="animate-spin" size={15} /> : <Play aria-hidden="true" size={15} />}
+        Run Analysis
       </button>
     </section>
   );
@@ -411,26 +478,22 @@ function WorkflowSidebar({
   const runState = getRunStateLabel(runStatus);
 
   return (
-    <aside className="min-w-0 lg:sticky lg:top-5 lg:self-start" aria-label="Create workflow sidebar">
-      <div className="artifact-card overflow-hidden bg-white shadow-[0_20px_55px_rgba(29,28,24,0.06)]">
-        <div className="flex items-start justify-between gap-4 border-b border-[#EEE9DF] bg-[#FBFAF7] p-5">
-          <div className="min-w-0 flex-1">
-            <div className="eyebrow">Workflow</div>
-            <div className="mt-2 inline-flex rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-[#625F57]">
-              {runState}
-            </div>
+    <aside className="artifact-card min-w-0 overflow-hidden bg-white shadow-[0_20px_55px_rgba(29,28,24,0.06)] lg:sticky lg:top-5 lg:self-start" aria-label="Create workflow sidebar">
+      <div className="flex items-start justify-between gap-4 border-b border-[#EEE9DF] bg-[#FBFAF7] p-5">
+        <div className="min-w-0 flex-1">
+          <div className="eyebrow">Workflow</div>
+          <div className="mt-2 inline-flex rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-[#625F57]">
+            {runState}
           </div>
-          <button type="button" onClick={onNewAnalysis} className="secondary-button pressable h-11 min-h-11 shrink-0 whitespace-nowrap px-4 text-sm">
-            <span className="inline-flex items-center justify-center gap-2">
-              <RotateCcw aria-hidden="true" size={15} />
-              New
-            </span>
-          </button>
         </div>
-        <div className="grid gap-6 p-5">
-          <VerticalProgressRail steps={steps} selectedStepId={selectedStepId} onSelectStep={onSelectStep} />
-          <RunHistory items={historyItems} onSelectItem={onSelectHistoryItem} />
-        </div>
+        <button type="button" onClick={onNewAnalysis} className="secondary-button pressable inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-2 whitespace-nowrap px-4 text-sm">
+          <RotateCcw aria-hidden="true" size={15} />
+          New Analysis
+        </button>
+      </div>
+      <div className="grid gap-6 p-5">
+        <VerticalProgressRail steps={steps} selectedStepId={selectedStepId} onSelectStep={onSelectStep} />
+        <RunHistory items={historyItems} onSelectItem={onSelectHistoryItem} />
       </div>
     </aside>
   );
@@ -574,7 +637,7 @@ function RunHistory({ items, onSelectItem }: { items: HistoryItem[]; onSelectIte
               <div className="min-w-0">
                 <div className="text-sm font-semibold leading-5 text-[#292824]">{item.title}</div>
                 <p className="mt-1 text-xs leading-5 text-[#625F57] [overflow-wrap:anywhere]">{item.detail}</p>
-                {item.timestamp && <time className="mt-2 block text-[11px] font-medium text-[#9D998E]" dateTime={item.timestamp}>{formatOperationTime(item.timestamp)}</time>}
+                {item.timestamp && <time className="mt-2 block text-[11px] font-medium tabular-nums text-[#9D998E]" dateTime={item.timestamp}>{formatOperationTime(item.timestamp)}</time>}
               </div>
             </div>
           </button>
@@ -707,11 +770,9 @@ function PipelineArtifact({
                 {errorBrief?.title ?? 'Pipeline failure'}
               </h2>
             </div>
-            <button type="button" onClick={onCopyError} className="secondary-button pressable px-4">
-              <span className="inline-flex items-center justify-center gap-2">
-                <Clipboard aria-hidden="true" size={15} />
-                {errorCopied ? 'Copied' : 'Copy fix brief'}
-              </span>
+            <button type="button" onClick={onCopyError} className="secondary-button pressable inline-flex items-center justify-center gap-2 px-4">
+              <Clipboard aria-hidden="true" size={15} />
+              {errorCopied ? 'Copied' : 'Copy Fix Brief'}
             </button>
           </div>
           <p className="mt-4 text-lg leading-8 text-[#3E2723]">{pipelineRun.error}</p>
@@ -777,7 +838,7 @@ function getSourceInputView({
   return {
     key: 'source-input',
     eyebrow: 'Source',
-    title: 'Source analysis is ready.',
+    title: 'Source Analysis Is Ready.',
     readableText: 'Source Source analysis is ready.',
     icon: <FileText aria-hidden="true" size={18} />,
     body: (
@@ -801,7 +862,7 @@ function getSourceAcceptedView(pipelineRun: PipelineRun, fallbackSourceText: str
   return {
     key: 'source-accepted',
     eyebrow: 'Source',
-    title: 'Submitted source.',
+    title: 'Submitted Source.',
     description: handoffActive ? 'Queued' : undefined,
     readableText: [
       'Source',
@@ -881,12 +942,12 @@ function createArtifactView({
     return {
       key: 'preparing',
       eyebrow: 'Queued',
-      title: 'Analysis is preparing.',
-      description: 'Waiting',
+      title: 'Analysis Is Preparing.',
+      description: 'Waiting…',
       icon: <LoaderCircle aria-hidden="true" size={18} />,
       body: (
         <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 text-sm leading-6 text-[#625F57]">
-          Waiting
+          Waiting…
         </StepReveal>
       ),
     };
@@ -950,7 +1011,7 @@ function createArtifactView({
         key: activeStep.id,
         step: activeStep,
         eyebrow: 'Source Details',
-        title: 'Submitted source metadata.',
+        title: 'Submitted Source Metadata.',
         icon: <Globe2 aria-hidden="true" size={18} />,
         body: (
           <>
@@ -1043,8 +1104,8 @@ function createArtifactView({
             step: activeStep,
             eyebrow: 'Check Official Source',
             title: discovery?.status === 'found'
-              ? 'Checking the official source'
-              : 'No official source found',
+              ? 'Checking the Official Source'
+              : 'No Official Source Found',
             description: discovery?.status === 'found'
               ? `We are opening ${discovery.candidate?.name ?? 'the official page'} to confirm it can decide the market.`
               : pipelineRun.analysis?.rejectionReason ?? discovery?.reason ?? 'The source did not include an official page that can decide the outcome.',
@@ -1098,7 +1159,7 @@ function createArtifactView({
         key: activeStep.id,
         step: activeStep,
         eyebrow: 'Check Existing Questions',
-        title: comparison.noveltyVerdict === 'new-opportunity' ? 'No overlapping question found' : `Question overlap check: ${comparison.noveltyVerdict}`,
+        title: comparison.noveltyVerdict === 'new-opportunity' ? 'No Overlapping Question Found' : `Question Overlap Check: ${comparison.noveltyVerdict}`,
         icon: <ListChecks aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
@@ -1189,7 +1250,7 @@ function createArtifactView({
         key: activeStep.id,
         step: activeStep,
         eyebrow: 'Quality Check',
-        title: 'Market drafts are checked before approval.',
+        title: 'Market Drafts Are Checked Before Approval.',
         icon: <ListChecks aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-5">
@@ -1235,7 +1296,7 @@ function createArtifactView({
         key: activeStep.id,
         step: activeStep,
         eyebrow: 'Check Wallet',
-        title: isReady ? 'Circle wallet is ready for proof attachment.' : 'Circle wallet is not ready.',
+        title: isReady ? 'Circle Wallet Is Ready for Proof Attachment.' : 'Circle Wallet Is Not Ready.',
         description: isReady
           ? 'The proof step can use this configured Arc Testnet wallet.'
           : wallet.error ?? 'Wallet configuration must be ready before a chain proof can be attached.',
@@ -1290,7 +1351,7 @@ function createArtifactView({
         key: activeStep.id,
         step: activeStep,
         eyebrow: traceCommitted ? 'Proof Saved' : 'Proof Prepared',
-        title: traceCommitted ? 'Arc proof saved.' : 'Proof prepared for review.',
+        title: traceCommitted ? 'Arc Proof Saved.' : 'Proof Prepared for Review.',
         icon: <ShieldCheck aria-hidden="true" size={18} />,
         body: (
           <div className="mt-8 grid gap-5 border-t border-[#E5E1D8] pt-6">
@@ -1358,23 +1419,19 @@ function createArtifactView({
                 type="button"
                 onClick={onCopy}
                 disabled={!isComplete}
-                className="secondary-button pressable px-4 disabled:cursor-not-allowed disabled:opacity-45"
+                className="secondary-button pressable inline-flex items-center justify-center gap-2 px-4 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                <span className="inline-flex items-center justify-center gap-2">
-                  {copied ? <Check aria-hidden="true" size={15} /> : <Clipboard aria-hidden="true" size={15} />}
-                  {copied ? 'Copied' : 'Copy'}
-                </span>
+                {copied ? <Check aria-hidden="true" size={15} /> : <Clipboard aria-hidden="true" size={15} />}
+                {copied ? 'Copied' : 'Copy'}
               </button>
               {isComplete && (
                 <button
                   type="button"
                   onClick={onOpenFinalArtifact}
-                  className="primary-button pressable px-4"
+                  className="primary-button pressable inline-flex items-center justify-center gap-2 px-4"
                 >
-                  <span className="inline-flex items-center justify-center gap-2">
-                    Open artifact
-                    <ArrowRight aria-hidden="true" size={15} />
-                  </span>
+                  Open Artifact
+                  <ArrowRight aria-hidden="true" size={15} />
                 </button>
               )}
             </div>
@@ -1391,7 +1448,7 @@ function createArtifactView({
                 <Criteria label="NO" value={market.noCriteria} />
               </StepReveal>
               <StepReveal index={2} className="sm:col-span-2">
-                <ArtifactField label="Resolution" value={`${market.deadline} · ${market.resolutionSource}`} />
+                <ArtifactField label="Resolution" value={`${market.deadline} / ${market.resolutionSource}`} />
                 <p className="mt-4 max-w-3xl text-base leading-7 text-[#625F57]">{market.evidenceSummary}</p>
               </StepReveal>
               {!isCommittedTrace(pipelineRun.trace) && (
@@ -1670,7 +1727,7 @@ function StepPendingArtifact({ title, description, progressRail }: { title: stri
   return (
     <StepArtifactFrame eyebrow="Queued" title={title} description={description} icon={<LoaderCircle aria-hidden="true" size={18} />} progressRail={progressRail}>
       <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 text-sm leading-6 text-[#625F57]">
-        Waiting
+        Waiting…
       </StepReveal>
     </StepArtifactFrame>
   );
@@ -1760,7 +1817,7 @@ function ContextArtifact({ pipelineRun, step, progressRail }: { pipelineRun: Pip
 type SourceReadiness = {
   canRun: boolean;
   message: string;
-  tone: 'idle' | 'blocked' | 'ready';
+  tone: 'idle' | 'blocked' | 'ready' | 'running';
 };
 
 
@@ -1771,7 +1828,7 @@ function getSourceReadiness(value: string, isRunning: boolean): SourceReadiness 
     return {
       canRun: false,
       message: 'The current run is still in progress.',
-      tone: 'idle',
+      tone: 'running',
     };
   }
 
@@ -1804,7 +1861,7 @@ function getSourceReadiness(value: string, isRunning: boolean): SourceReadiness 
     return {
       canRun: false,
       message: `Paste at least ${MIN_PASTED_SOURCE_LENGTH} characters of source text.`,
-      tone: 'idle',
+      tone: 'blocked',
     };
   }
 
@@ -1989,23 +2046,19 @@ function FinalArtifact({
             type="button"
             onClick={onCopy}
             disabled={!isComplete}
-            className="secondary-button pressable px-4 disabled:cursor-not-allowed disabled:opacity-45"
+            className="secondary-button pressable inline-flex items-center justify-center gap-2 px-4 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            <span className="inline-flex items-center justify-center gap-2">
-              {copied ? <Check aria-hidden="true" size={15} /> : <Clipboard aria-hidden="true" size={15} />}
-              {copied ? 'Copied' : 'Copy'}
-            </span>
+            {copied ? <Check aria-hidden="true" size={15} /> : <Clipboard aria-hidden="true" size={15} />}
+            {copied ? 'Copied' : 'Copy'}
           </button>
           {isComplete && (
             <button
               type="button"
               onClick={onOpenFinalArtifact}
-              className="primary-button pressable px-4"
+              className="primary-button pressable inline-flex items-center justify-center gap-2 px-4"
             >
-              <span className="inline-flex items-center justify-center gap-2">
-                Open artifact
-                <ArrowRight aria-hidden="true" size={15} />
-              </span>
+              Open Artifact
+              <ArrowRight aria-hidden="true" size={15} />
             </button>
           )}
         </div>
@@ -2015,7 +2068,7 @@ function FinalArtifact({
 }
 
 function Runtime({ runtimeMs }: { runtimeMs: number }) {
-  return <p className="mt-2 text-sm font-medium text-[#77746B]">Analyzed in {(runtimeMs / 1000).toFixed(1)}s</p>;
+  return <p className="mt-2 text-sm font-medium tabular-nums text-[#77746B]">Analyzed in {(runtimeMs / 1000).toFixed(1)} s</p>;
 }
 
 function Criteria({ label, value }: { label: string; value: string }) {
@@ -2080,7 +2133,7 @@ function ArtifactField({ label, value }: { label: string; value: string }) {
 
 function getExtractionTitle(run: PipelineRun, step: PipelineStep): string {
   if (run.extractedSource) return looksLikeUrl(run.sourceInput) ? 'Article source prepared.' : 'Source text prepared.';
-  if (looksLikeUrl(run.sourceInput)) return step.status === 'complete' ? 'Article source prepared.' : 'Extracting article...';
+  if (looksLikeUrl(run.sourceInput)) return step.status === 'complete' ? 'Article source prepared.' : 'Extracting article…';
   return step.status === 'complete' ? 'Source text prepared.' : 'Preparing pasted source.';
 }
 
@@ -2169,7 +2222,7 @@ function formatStepStatus(status: PipelineStepStatus): string {
   if (status === 'complete') return 'Done';
   if (status === 'running') return 'Running';
   if (status === 'failed') return 'Blocked';
-  return 'Waiting';
+  return 'Waiting…';
 }
 
 function getRunStateLabel(status: PipelineRun['status']): string {
