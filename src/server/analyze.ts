@@ -32,7 +32,7 @@ export async function handleAnalyzeRequest(request: IncomingMessage, response: S
   }
 
   try {
-    failIfRuntimeNotReady();
+    await failIfRuntimeNotReady();
     const body = await readJson(request);
     const parsedRequest = analyzeRequestSchema.safeParse(body);
 
@@ -49,9 +49,8 @@ export async function handleAnalyzeRequest(request: IncomingMessage, response: S
 
     sendJson(response, 200, validated.data);
   } catch (error) {
-    const stage = error instanceof StageError ? error.stage : inferStage(error);
-    const message = error instanceof Error ? error.message : 'Analysis failed.';
-    sendError(response, statusForStage(stage), message, stage, likelyCause(stage), error instanceof StageError ? error.details : []);
+    const payload = createAnalyzeErrorPayload(error);
+    sendError(response, statusForStage(payload.stage), payload.error, payload.stage, payload.likelyCause, payload.details);
   }
 }
 
@@ -74,7 +73,7 @@ export async function handleAnalyzeStreamRequest(request: IncomingMessage, respo
   };
 
   try {
-    failIfRuntimeNotReady();
+    await failIfRuntimeNotReady();
     const body = await readJson(request);
     const parsedRequest = analyzeRequestSchema.safeParse(body);
 
@@ -84,14 +83,13 @@ export async function handleAnalyzeStreamRequest(request: IncomingMessage, respo
 
     await runPipeline(parsedRequest.data.sourceText, emit);
   } catch (error) {
-    const stage = error instanceof StageError ? error.stage : inferStage(error);
-    const message = error instanceof Error ? error.message : 'Analysis failed.';
+    const payload = createAnalyzeErrorPayload(error);
     emit({
       type: 'run-failed',
-      stage,
-      error: message,
-      likelyCause: likelyCause(stage),
-      details: error instanceof StageError ? error.details : [],
+      stage: payload.stage,
+      error: payload.error,
+      likelyCause: payload.likelyCause,
+      details: payload.details,
     });
   } finally {
     response.end();
@@ -195,7 +193,9 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
       start: 'checking wording, deadline, official source, question overlap, and placeholders',
       complete: 'quality decision recorded',
       artifact: (value) => ({
-        criticVerdict: value.criticVerdict,
+        criticVerdict: value.status === 'accepted'
+          ? { ...value.criticVerdict, draftId: candidateMarkets[0]?.id ?? value.criticVerdict.draftId }
+          : value.criticVerdict,
         acceptedMarket: value.status === 'accepted' ? candidateMarkets[0] : null,
         rejectionReason: value.status === 'rejected' ? value.rejectionReason : null,
       }),
@@ -237,7 +237,11 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
       return validated.data;
     }
 
-    const criticVerdict = criticOutcome.criticVerdict;
+    const acceptedMarket = candidateMarkets[0];
+    const criticVerdict = {
+      ...criticOutcome.criticVerdict,
+      draftId: acceptedMarket.id,
+    };
     const circleAgentWallet = await atStage('circle-wallet', runId, emit, () => getCircleAgentWalletStatus(), {
       start: 'checking Circle test-wallet proof',
       heartbeat: ['requesting Circle wallet status', 'checking configured agent wallet address'],
@@ -249,7 +253,6 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
       throw new StageError('circle-wallet', circleAgentWallet.error ?? 'Circle ARC-TESTNET wallet is not ready.');
     }
 
-    const acceptedMarket = candidateMarkets[0];
     const baseArtifact = {
       runId,
       status: 'accepted' as const,
@@ -313,8 +316,9 @@ async function runPipeline(sourceInput: string, emit?: PipelineProgressEmitter):
   }
 }
 
-function failIfRuntimeNotReady() {
-  const missing = getMissingProductionConfig();
+async function failIfRuntimeNotReady() {
+  const status = await getRuntimeStatus();
+  const missing = status.missing.length ? status.missing : getMissingProductionConfig();
 
   if (missing.length > 0) {
     throw new StageError('runtime-config', 'AgoraBabel runtime is not ready for no-fallback analysis.', missing.map((item) => `Missing or invalid: ${item}`));
@@ -491,8 +495,26 @@ class StageError extends Error {
   }
 }
 
-function inferStage(error: unknown): PipelineStage {
+export function createAnalyzeErrorPayload(error: unknown): {
+  error: string;
+  stage: PipelineStage | 'request-validation';
+  likelyCause: string;
+  details: string[];
+} {
+  const stage = error instanceof StageError ? error.stage : inferStage(error);
+  const message = error instanceof Error ? error.message : 'Analysis failed.';
+
+  return {
+    error: message,
+    stage,
+    likelyCause: likelyCause(stage),
+    details: error instanceof StageError ? error.details : productionSafeErrorDetails(error),
+  };
+}
+
+function inferStage(error: unknown): PipelineStage | 'request-validation' {
   const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (error instanceof SyntaxError || message.includes('json')) return 'request-validation';
   if (message.includes('circle')) return 'circle-wallet';
   if (message.includes('arc')) return 'arc-trace-commit';
   if (message.includes('discovery')) return 'resolver-discovery';
@@ -501,6 +523,15 @@ function inferStage(error: unknown): PipelineStage {
   if (message.includes('llm') || message.includes('groq') || message.includes('openai')) return 'claim-extraction';
   if (message.includes('url extraction') || message.includes('source')) return 'source-extraction';
   return 'runtime-config';
+}
+
+function productionSafeErrorDetails(error: unknown) {
+  if (!(error instanceof Error)) return [];
+
+  return [
+    `Error type: ${error.name || 'Error'}`,
+    'Server logs contain the full stack trace for this request.',
+  ];
 }
 
 function likelyCause(stage: string) {

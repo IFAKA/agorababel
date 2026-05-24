@@ -1,1 +1,14 @@
-export { handleAnalyzeRequest as default } from '../src/server/analyze';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createAnalyzeErrorPayload, handleAnalyzeRequest } from '../src/server/analyze';
+import { sendError } from '../src/server/http';
+
+export default async function analyzeApi(request: IncomingMessage, response: ServerResponse) {
+  try {
+    await handleAnalyzeRequest(request, response);
+  } catch (error) {
+    if (response.writableEnded) return;
+
+    const payload = createAnalyzeErrorPayload(error);
+    sendError(response, 500, payload.error, payload.stage, payload.likelyCause, payload.details);
+  }
+}

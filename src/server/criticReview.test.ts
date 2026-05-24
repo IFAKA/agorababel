@@ -24,13 +24,37 @@ test('critic review accepts only passing strict verdicts', () => {
   assert.equal(outcome.criticVerdict.decision, 'accepted');
 });
 
+test('critic review accepts Spanish binary question wording', () => {
+  const outcome = enforceCritic(createDraft({
+    question: '¿Publicará la Contraloría General de la República la ratificación oficial del acuerdo CEOL antes del 2026-06-30?',
+  }), 'new-opportunity');
+
+  assert.equal(outcome.status, 'accepted');
+});
+
+test('critic review accepts stale rejected verdict when every strict check passes', () => {
+  const outcome = enforceCritic(createDraft({
+    decision: 'rejected',
+    forcePassingChecks: true,
+    failedRules: [],
+    rejectionReason: null,
+    question: '¿Publicará la Contraloría General de la República la ratificación oficial del acuerdo CEOL antes del 2026-06-30?',
+  }), 'new-opportunity');
+
+  assert.equal(outcome.status, 'accepted');
+  assert.equal(outcome.criticVerdict.decision, 'accepted');
+});
+
 function createDraft(overrides: {
   decision?: LlmDraft['criticVerdict']['decision'];
+  forcePassingChecks?: boolean;
   failedRules?: string[];
   rejectionReason?: string | null;
+  question?: string;
 } = {}): LlmDraft {
   const decision = overrides.decision ?? 'accepted';
   const failedRules = overrides.failedRules ?? [];
+  const shouldPassChecks = decision === 'accepted' || overrides.forcePassingChecks;
 
   return {
     source: {
@@ -52,7 +76,7 @@ function createDraft(overrides: {
     },
     candidateMarkets: [{
       id: 'chile-reconstruction-senate-2026',
-      question: 'Will Chile pass the Reconstruction bill before 2026-06-01?',
+      question: overrides.question ?? 'Will Chile pass the Reconstruction bill before 2026-06-01?',
       yesCriteria: 'YES if the Chilean Senate or official legislative record confirms passage before 2026-06-01.',
       noCriteria: 'NO if no such official confirmation is published before 2026-06-01.',
       deadline: '2026-06-01',
@@ -84,8 +108,8 @@ function createDraft(overrides: {
       draftId: 'chile-reconstruction-senate-2026',
       decision,
       checks: {
-        binary: decision === 'accepted' ? 'pass' : 'fail',
-        resolver: decision === 'accepted' ? 'pass' : 'fail',
+        binary: shouldPassChecks ? 'pass' : 'fail',
+        resolver: shouldPassChecks ? 'pass' : 'fail',
         deadline: 'pass',
         evidence: 'pass',
         novelty: 'pass',

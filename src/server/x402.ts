@@ -232,7 +232,7 @@ function createReceipt(payment: PaymentRequest['payment'] | undefined): X402Rece
 }
 
 function getArtifactId(url: string | undefined, suffix: 'intelligence' | 'demo-unlock') {
-  const match = (url ?? '').match(new RegExp(`/api/markets/([^/]+)/${suffix}`));
+  const match = (url ?? '').match(new RegExp(`(?:/api/markets)?/([^/]+)/${suffix}`));
   return decodeURIComponent(match?.[1] ?? '');
 }
 

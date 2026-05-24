@@ -264,6 +264,7 @@ async function fetchCandidate(candidate: ResolverCandidate): Promise<FetchedCand
 
 function inspectCandidate(fetched: FetchedCandidate, draft: LlmDraft): { ok: true; evidence: string } | { ok: false; reason: string } {
   const host = normalizeHost(new URL(fetched.candidate.url).hostname);
+  const path = new URL(fetched.candidate.url).pathname;
   const normalizedBody = fetched.body.toLowerCase();
   const bodyForMatching = stripDiacritics(normalizedBody);
 
@@ -273,6 +274,17 @@ function inspectCandidate(fetched: FetchedCandidate, draft: LlmDraft): { ok: tru
 
   if (fetched.body && !containsOfficialSignal(fetched.body, fetched.candidate.name, host)) {
     return { ok: false, reason: `fetched page did not plausibly match ${fetched.candidate.name}` };
+  }
+
+  if (isFutureOfficialPublicationSource(fetched.candidate, host, path)) {
+    return {
+      ok: true,
+      evidence: [
+        `${host} is a known official resolver domain`,
+        'official resolver homepage/future publication source fetched successfully',
+        fetched.contentType ? `content-type ${fetched.contentType}` : '',
+      ].filter(Boolean).join('; ') + '.',
+    };
   }
 
   const claimTerms = [
@@ -298,6 +310,12 @@ function inspectCandidate(fetched: FetchedCandidate, draft: LlmDraft): { ok: tru
   ].filter(Boolean);
 
   return { ok: true, evidence: evidenceParts.join('; ') + '.' };
+}
+
+function isFutureOfficialPublicationSource(candidate: ResolverCandidate, host: string, path: string) {
+  if (!isKnownOfficialResolverHost(host)) return false;
+  if (candidate.source === 'official-homepage') return true;
+  return path === '/' || path === '';
 }
 
 function officialHostsForDraft(draft: LlmDraft): string[] {

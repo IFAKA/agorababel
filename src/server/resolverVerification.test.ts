@@ -126,6 +126,93 @@ test('discovery can find a Bank of England MPC resolver through official search'
   }
 });
 
+test('discovery accepts the Chile Contraloria homepage as a future official resolver', async () => {
+  const originalFetch = globalThis.fetch;
+  const draft = createDraft({
+    actors: ['Gobierno de Chile', 'Contraloria General de la Republica'],
+    eventType: 'CEOL ratification',
+    deadline: '2026-06-30',
+    resolverName: 'Contraloria General de la Republica de Chile',
+    resolverUrl: 'https://www.contraloria.cl/',
+  });
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+
+    if (url === 'https://www.contraloria.cl/') {
+      return textResponse('Contraloria General de la Republica de Chile');
+    }
+
+    if (url.startsWith('https://duckduckgo.com/html/')) {
+      return textResponse('');
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    const discovery = await discoverOfficialResolver({
+      draft,
+      sourceUrl: null,
+      outboundUrls: [],
+      sourceText: 'The official ratification may be published in the future by Contraloria.',
+    });
+
+    assert.equal(discovery.status, 'found');
+    assert.equal(discovery.status === 'found' ? discovery.candidate.url : '', 'https://www.contraloria.cl/');
+
+    const resolver = await verifyResolver(discovery.status === 'found' ? discovery.candidate : assert.fail('missing candidate'), draft);
+    assert.match(resolver.verificationEvidence, /future publication source/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('discovery continues after a 403 official candidate and selects another official homepage', async () => {
+  const originalFetch = globalThis.fetch;
+  const draft = createDraft({
+    actors: ['Gobierno de Chile', 'Contraloria General de la Republica'],
+    eventType: 'CEOL ratification',
+    deadline: '2026-06-30',
+    resolverName: 'Gobierno de Chile',
+    resolverUrl: 'https://www.gob.cl/',
+  });
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+
+    if (url === 'https://www.gob.cl/') {
+      return new Response('Forbidden', { status: 403, headers: { 'Content-Type': 'text/plain' } });
+    }
+
+    if (url === 'https://www.contraloria.cl/') {
+      return textResponse('Contraloria General de la Republica de Chile');
+    }
+
+    if (url.startsWith('https://duckduckgo.com/html/')) {
+      return textResponse('');
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    const discovery = await discoverOfficialResolver({
+      draft,
+      sourceUrl: null,
+      outboundUrls: [],
+      sourceText: 'The official decision could be published by Gobierno de Chile or Contraloria.',
+    });
+
+    assert.equal(discovery.status, 'found');
+    assert.equal(discovery.status === 'found' ? discovery.candidate.url : '', 'https://www.contraloria.cl/');
+    assert.equal(discovery.checkedCandidates.find((candidate) => candidate.url === 'https://www.gob.cl/')?.status, 'rejected');
+    assert.equal(discovery.checkedCandidates.find((candidate) => candidate.url === 'https://www.contraloria.cl/')?.status, 'selected');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function createDraft(overrides: Partial<{
   region: string;
   actors: string[];

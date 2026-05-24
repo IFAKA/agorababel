@@ -21,21 +21,32 @@ function analyzeApi() {
   return {
     name: 'agorababel-analyze-api',
     configureServer(server) {
-      server.middlewares.use('/api/runtime-status', (request, response) => {
-        void handleRuntimeStatusRequest(request, response)
-      })
-      server.middlewares.use('/api/analyze/stream', (request, response) => {
-        void handleAnalyzeStreamRequest(request, response)
-      })
-      server.middlewares.use('/api/analyze', (request, response) => {
-        void handleAnalyzeRequest(request, response)
-      })
-      server.middlewares.use('/api/events', (request, response) => {
-        void handleEventsRequest(request, response)
-      })
-      server.middlewares.use('/api/markets', (request, response) => {
-        void handleMarketIntelligenceRequest(request, response)
-      })
+      const apiHandler = (handler, routeStage) => (request, response) => {
+        Promise.resolve(handler(request, response)).catch((error) => {
+          server.config.logger.error(error)
+
+          if (response.writableEnded) return
+          if (response.headersSent) {
+            response.end()
+            return
+          }
+
+          response.statusCode = 500
+          response.setHeader('Content-Type', 'application/json;charset=utf-8')
+          response.end(JSON.stringify({
+            error: error instanceof Error ? error.message : 'Analysis failed.',
+            stage: routeStage,
+            likelyCause: 'The API middleware failed before the no-fallback stage handler could return a structured result.',
+            details: ['Inspect the dev server console for the original backend exception.'],
+          }))
+        })
+      }
+
+      server.middlewares.use('/api/runtime-status', apiHandler(handleRuntimeStatusRequest, 'runtime-config'))
+      server.middlewares.use('/api/analyze/stream', apiHandler(handleAnalyzeStreamRequest, 'api'))
+      server.middlewares.use('/api/analyze', apiHandler(handleAnalyzeRequest, 'api'))
+      server.middlewares.use('/api/events', apiHandler(handleEventsRequest, 'events'))
+      server.middlewares.use('/api/markets', apiHandler(handleMarketIntelligenceRequest, 'x402-publication'))
     },
   }
 }

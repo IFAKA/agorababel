@@ -268,13 +268,12 @@ async function analyzeSource(sourceText: string, signal?: AbortSignal): Promise<
     );
   }
 
-  const payload: unknown = await response.json().catch(() => null);
-
   if (!response.ok) {
-    const errorPayload = parseErrorPayload(payload);
+    const errorPayload = await readErrorPayload(response);
     throw new AnalysisRequestError(errorPayload.message, response.status, errorPayload.stage, errorPayload.likelyCause, errorPayload.details);
   }
 
+  const payload: unknown = await response.json().catch(() => null);
   const parsed = AnalysisResultSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AnalysisRequestError(
@@ -314,8 +313,7 @@ async function* streamAnalyzeSource(sourceText: string, signal?: AbortSignal): A
   }
 
   if (!response.ok || !response.body) {
-    const payload: unknown = await response.json().catch(() => null);
-    const errorPayload = parseErrorPayload(payload);
+    const errorPayload = await readErrorPayload(response);
     throw new AnalysisRequestError(errorPayload.message, response.status, errorPayload.stage, errorPayload.likelyCause, errorPayload.details);
   }
 
@@ -452,13 +450,32 @@ function createRejectionBrief(message: string, stage: PipelineStage, sourceText:
   };
 }
 
-function parseErrorPayload(payload: unknown) {
+async function readErrorPayload(response: Response) {
+  const body = await response.text().catch(() => '');
+  let payload: unknown = null;
+
+  if (body.trim()) {
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      payload = null;
+    }
+  }
+
+  return parseErrorPayload(payload, body);
+}
+
+function parseErrorPayload(payload: unknown, rawBody = '') {
   if (!payload || typeof payload !== 'object') {
+    const bodySnippet = rawBody.trim().replace(/\s+/g, ' ').slice(0, 500);
     return {
       message: 'Analysis failed.',
       stage: 'api',
       likelyCause: 'The API returned an error without a JSON body.',
-      details: ['Inspect the Network response body for /api/analyze.'],
+      details: [
+        'Inspect the Network response body for /api/analyze.',
+        ...(bodySnippet ? [`Response body: ${bodySnippet}`] : []),
+      ],
     };
   }
 

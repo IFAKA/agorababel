@@ -10,6 +10,7 @@ import { DEFAULT_MARKET_SLUG, getMarketPath, getMarketSlugFromPath, getPipelineR
 import { ApiPipelineProvider, createSubmission, runAgentPipeline, SimulatedPipelineProvider, type PipelineProvider, type PipelineRun } from './pipeline';
 
 export type Screen = 'landing' | 'create' | 'market';
+type RuntimeMode = 'checking' | 'live' | 'preview';
 
 const screenTitles: Record<Screen, string> = {
   landing: 'Operational Intelligence',
@@ -129,6 +130,8 @@ export default function App() {
   );
   const [transitionDirection, setTransitionDirection] = useState(1);
   const [activePipelineProvider, setActivePipelineProvider] = useState<PipelineProvider | null>(null);
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('checking');
+  const [runtimeNotice, setRuntimeNotice] = useState<string | null>(null);
   const [submissionRuns, setSubmissionRuns] = useState<PipelineRun[]>([]);
   const currentScreenRef = useRef(currentScreen);
   const sampleRunTimerRef = useRef<number | null>(null);
@@ -136,6 +139,42 @@ export default function App() {
   const themeMode = useThemeMode();
   const apiPipelineProvider = useMemo(() => new ApiPipelineProvider(), []);
   const demoPipelineProvider = useMemo(() => new SimulatedPipelineProvider(), []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkRuntime() {
+      try {
+        const response = await fetch('/api/runtime-status');
+        const payload = await response.json().catch(() => null) as { status?: string; missing?: string[] } | null;
+
+        if (cancelled) return;
+
+        if (response.ok && payload?.status === 'ready') {
+          setRuntimeMode('live');
+          setRuntimeNotice(null);
+          return;
+        }
+
+        setRuntimeMode('preview');
+        setRuntimeNotice(
+          payload?.missing?.length
+            ? `Live runtime unavailable. Preview mode is using prepared records until ${payload.missing.slice(0, 3).join(', ')} is configured.`
+            : 'Live runtime unavailable. Preview mode is using prepared records.',
+        );
+      } catch {
+        if (cancelled) return;
+        setRuntimeMode('preview');
+        setRuntimeNotice('Live runtime status could not be checked. Preview mode is using prepared records.');
+      }
+    }
+
+    checkRuntime();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     currentScreenRef.current = currentScreen;
@@ -231,7 +270,7 @@ export default function App() {
     setCurrentScreen('create');
   };
 
-  const handleGenerateMarket = (input: string) => {
+  const startAnalysis = (input: string) => {
     if (sampleRunTimerRef.current !== null) {
       window.clearTimeout(sampleRunTimerRef.current);
       sampleRunTimerRef.current = null;
@@ -240,9 +279,13 @@ export default function App() {
     const submission = createSubmission(input);
     setSourceText(submission.sourceText);
     setPipelineRun(runAgentPipeline(submission));
-    setActivePipelineProvider(apiPipelineProvider);
+    setActivePipelineProvider(runtimeMode === 'preview' ? demoPipelineProvider : apiPipelineProvider);
     setRunId((currentRunId) => currentRunId + 1);
     handleNavigate('create');
+  };
+
+  const handleGenerateMarket = (input: string) => {
+    startAnalysis(input);
   };
 
   const handleSourceTextChange = (value: string) => {
@@ -260,18 +303,7 @@ export default function App() {
   };
 
   const handleRunSampleArticle = () => {
-    const submission = createSubmission(sampleArticle.sourceText);
-
-    if (sampleRunTimerRef.current !== null) {
-      window.clearTimeout(sampleRunTimerRef.current);
-      sampleRunTimerRef.current = null;
-    }
-
-    setSourceText(submission.sourceText);
-    setPipelineRun(runAgentPipeline(submission));
-    handleNavigate('create');
-    setActivePipelineProvider(demoPipelineProvider);
-    setRunId((currentRunId) => currentRunId + 1);
+    startAnalysis(sampleArticle.sourceText);
   };
 
   const handleNewAnalysis = () => {
@@ -429,6 +461,7 @@ export default function App() {
                       onNewAnalysis={handleNewAnalysis}
                       submissionHistory={submissionHistory}
                       onSelectSubmission={handleSelectSubmission}
+                      runtimeNotice={runtimeNotice}
                     />
                   )}
                   {currentScreen === 'market' && <MarketScreen pipelineRun={pipelineRun} onBackToWorkflow={handleBackToWorkflow} />}

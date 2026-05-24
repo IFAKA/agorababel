@@ -1,3 +1,5 @@
+import { GatewayClient } from '@circle-fin/x402-batching/client';
+
 export type ServiceStatus = {
   status: 'configured' | 'unconfigured' | 'reachable' | 'unreachable';
   details: string;
@@ -79,8 +81,10 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   const missing = getMissingProductionConfig();
   const arcReachable = await checkArcRpc(config.arcRpcUrl);
   const llmConfigured = config.provider === 'groq' ? Boolean(process.env.GROQ_API_KEY) : Boolean(process.env.OPENAI_API_KEY);
+  const x402Buyer = await checkX402BuyerPaymentReadiness(config);
 
   if (!arcReachable) missing.push('ARC_TESTNET_RPC_URL reachable RPC');
+  if (config.x402Enabled && !x402Buyer.ready) missing.push(x402Buyer.missing);
 
   return {
     status: missing.length === 0 ? 'ready' : 'not-ready',
@@ -108,9 +112,11 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
         details: config.circleAgentWalletAddress || 'Circle ARC-TESTNET wallet config missing',
       },
       x402: {
-        status: config.x402Enabled && config.x402PayToAddress && config.x402PriceUsdcMicro > 0 && config.x402BuyerPrivateKey ? 'configured' : 'unconfigured',
+        status: config.x402Enabled && config.x402PayToAddress && config.x402PriceUsdcMicro > 0 && config.x402BuyerPrivateKey
+          ? x402Buyer.ready ? 'reachable' : 'unreachable'
+          : 'unconfigured',
         details: config.x402Enabled
-          ? `Circle Gateway x402 enabled at ${config.x402FacilitatorUrl}`
+          ? x402Buyer.details
           : 'X402_ENABLED=false',
       },
     },
@@ -134,4 +140,75 @@ async function checkArcRpc(rpcUrl: string) {
   } catch {
     return false;
   }
+}
+
+async function checkX402BuyerPaymentReadiness(config: ReturnType<typeof getRuntimeConfig>) {
+  if (!config.x402Enabled) {
+    return {
+      ready: true,
+      missing: '',
+      details: 'X402_ENABLED=false',
+    };
+  }
+
+  if (!config.x402BuyerPrivateKey || !config.x402PriceUsdcMicro || config.x402PriceUsdcMicro <= 0) {
+    return {
+      ready: false,
+      missing: 'X402_BUYER_PRIVATE_KEY with positive X402_PRICE_USDC_MICRO',
+      details: 'x402 buyer payment config is incomplete.',
+    };
+  }
+
+  try {
+    const buyer = new GatewayClient({
+      chain: 'arcTestnet',
+      privateKey: normalizePrivateKey(config.x402BuyerPrivateKey),
+      rpcUrl: config.arcRpcUrl,
+    });
+    const balances = await buyer.getBalances();
+    const requiredAmount = BigInt(config.x402PriceUsdcMicro);
+    const gatewayAvailable = toBigIntBalance((balances as { gateway?: { available?: unknown } }).gateway?.available);
+    const walletAvailable = toBigIntBalance((balances as { wallet?: { available?: unknown; balance?: unknown } }).wallet?.available)
+      ?? toBigIntBalance((balances as { wallet?: { balance?: unknown } }).wallet?.balance)
+      ?? 0n;
+    const totalPayable = gatewayAvailable + walletAvailable;
+
+    if (totalPayable >= requiredAmount) {
+      return {
+        ready: true,
+        missing: '',
+        details: `Buyer ${buyer.address} can cover ${formatUsdcMicro(requiredAmount)} USDC through Gateway or wallet balance.`,
+      };
+    }
+
+    return {
+      ready: false,
+      missing: `X402 buyer ${buyer.address} needs at least ${formatUsdcMicro(requiredAmount)} USDC; available ${formatUsdcMicro(totalPayable)} USDC`,
+      details: `Buyer ${buyer.address} has ${formatUsdcMicro(gatewayAvailable)} USDC in Gateway and ${formatUsdcMicro(walletAvailable)} USDC in wallet; needs ${formatUsdcMicro(requiredAmount)} USDC.`,
+    };
+  } catch (error) {
+    return {
+      ready: false,
+      missing: 'X402 buyer balance check reachable',
+      details: error instanceof Error ? error.message : 'x402 buyer balance check failed.',
+    };
+  }
+}
+
+function normalizePrivateKey(value: string) {
+  return (value.startsWith('0x') ? value : `0x${value}`) as `0x${string}`;
+}
+
+function toBigIntBalance(value: unknown) {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.trunc(value));
+  if (typeof value === 'string' && /^\d+$/.test(value)) return BigInt(value);
+  return null;
+}
+
+function formatUsdcMicro(value: bigint | number) {
+  const atomic = typeof value === 'bigint' ? value : BigInt(value);
+  const whole = atomic / 1_000_000n;
+  const fraction = (atomic % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole.toString();
 }

@@ -142,6 +142,7 @@ export function ProcessingScreen({
   onNewAnalysis,
   submissionHistory,
   onSelectSubmission,
+  runtimeNotice,
 }: {
   sourceText: string;
   onSourceTextChange: (value: string) => void;
@@ -152,6 +153,7 @@ export function ProcessingScreen({
   onNewAnalysis: () => void;
   submissionHistory: SubmissionHistoryItem[];
   onSelectSubmission: (id: string) => void;
+  runtimeNotice?: string | null;
 }) {
   const [copied, setCopied] = useState(false);
   const [errorCopied, setErrorCopied] = useState(false);
@@ -349,6 +351,7 @@ export function ProcessingScreen({
           onSourceTextChange={onSourceTextChange}
           onRunPipeline={onRunPipeline}
           sourceReadiness={sourceReadiness}
+          runtimeNotice={runtimeNotice}
           pipelineRun={pipelineRun}
           activeStep={displayedStep}
           copied={copied}
@@ -721,6 +724,7 @@ function PipelineArtifact({
   onSourceTextChange,
   onRunPipeline,
   sourceReadiness,
+  runtimeNotice,
   pipelineRun,
   activeStep,
   copied,
@@ -739,6 +743,7 @@ function PipelineArtifact({
   onSourceTextChange: (value: string) => void;
   onRunPipeline: (value: string) => void;
   sourceReadiness: SourceReadiness;
+  runtimeNotice?: string | null;
   pipelineRun: PipelineRun;
   activeStep?: PipelineStep;
   copied: boolean;
@@ -819,8 +824,17 @@ function PipelineArtifact({
       transitionDirection={transitionDirection}
       reduceMotion={Boolean(reduceMotion)}
     >
+      {runtimeNotice && <RuntimeNotice>{runtimeNotice}</RuntimeNotice>}
       {view.body}
     </StepArtifactFrame>
+  );
+}
+
+function RuntimeNotice({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-5 rounded-md border border-[#D8D3C8] bg-[#FFFDF7] p-3 text-sm font-medium leading-6 text-[#625F57]">
+      {children}
+    </div>
   );
 }
 

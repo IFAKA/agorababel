@@ -39,7 +39,8 @@ export async function compareMarketNovelty(draft: LlmDraft) {
       throw new Error(`Market comparison failed: ${source.source} returned HTTP ${response.status}.`);
     }
 
-    const text = (await response.text()).toLowerCase();
+    const html = await response.text();
+    const text = extractMarketResultText(html, source.source).toLowerCase();
     const actorMatches = draft.claim.actors.filter((actor) => text.includes(actor.toLowerCase())).length;
     const eventMatch = text.includes(draft.claim.eventType.toLowerCase()) || text.includes(draft.claim.region.toLowerCase());
 
@@ -63,4 +64,49 @@ export async function compareMarketNovelty(draft: LlmDraft) {
       ? 'Comparable public market pages contained overlapping actors and event terms.'
       : 'Configured public market searches completed without overlapping actor/event matches.',
   };
+}
+
+function extractMarketResultText(html: string, source: string) {
+  const resultTexts: string[] = [];
+  const anchorMatches = html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi);
+
+  for (const match of anchorMatches) {
+    const href = decodeHtmlEntities(match[1] ?? '');
+    if (!looksLikeMarketResultHref(href, source)) continue;
+
+    const label = stripHtml(match[2] ?? '');
+    if (label) resultTexts.push(`${href} ${label}`);
+  }
+
+  return resultTexts.join('\n');
+}
+
+function looksLikeMarketResultHref(href: string, source: string) {
+  if (source === 'Polymarket search') {
+    return /(^\/|\/\/|polymarket\.com\/)(event|market)\//i.test(href);
+  }
+
+  if (source === 'Kalshi search') {
+    return /(^\/|\/\/|kalshi\.com\/)markets\//i.test(href);
+  }
+
+  return false;
+}
+
+function stripHtml(value: string) {
+  return decodeHtmlEntities(value)
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
 }

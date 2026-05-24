@@ -12,7 +12,10 @@ export function enforceCritic(draft: LlmDraft, noveltyVerdict: 'new-opportunity'
     throw new Error('Critic review failed: at least two source-specific rejected candidates are required.');
   }
 
-  if (draft.criticVerdict.decision !== 'accepted') {
+  const checks = Object.values(draft.criticVerdict.checks);
+  const hasFailedChecks = checks.some((value) => value !== 'pass');
+
+  if (draft.criticVerdict.decision !== 'accepted' && (hasFailedChecks || draft.criticVerdict.failedRules.length > 0)) {
     return reject(draft, draft.rejectionReason ?? draft.criticVerdict.reasoning);
   }
 
@@ -21,7 +24,7 @@ export function enforceCritic(draft: LlmDraft, noveltyVerdict: 'new-opportunity'
   }
 
   const text = [candidate.question, candidate.yesCriteria, candidate.noCriteria, candidate.resolverName].join(' ');
-  if (!/\bwill\b/i.test(candidate.question) || !/\?/.test(candidate.question)) {
+  if (!isBinaryQuestion(candidate.question)) {
     return reject(draft, 'Critic review rejected the market because the accepted market must be a binary question.');
   }
 
@@ -29,7 +32,7 @@ export function enforceCritic(draft: LlmDraft, noveltyVerdict: 'new-opportunity'
     return reject(draft, 'Critic review rejected the market because the accepted market contains placeholder wording.');
   }
 
-  if (Object.values(draft.criticVerdict.checks).some((value) => value !== 'pass')) {
+  if (hasFailedChecks) {
     return reject(draft, `Critic review rejected the market: ${draft.criticVerdict.failedRules.join(', ') || 'one or more checks failed'}.`);
   }
 
@@ -41,7 +44,20 @@ export function enforceCritic(draft: LlmDraft, noveltyVerdict: 'new-opportunity'
     return reject(draft, `Critic review rejected the market because YES probability is ${candidate.marketBalance.yesProbability}%, outside the 15%-85% tradability range.`);
   }
 
-  return { status: 'accepted', criticVerdict: draft.criticVerdict };
+  return {
+    status: 'accepted',
+    criticVerdict: {
+      ...draft.criticVerdict,
+      decision: 'accepted',
+      failedRules: [],
+    },
+  };
+}
+
+function isBinaryQuestion(question: string) {
+  if (!/\?/.test(question)) return false;
+  if (/\bwill\b/i.test(question)) return true;
+  return /^¿?\s*(se|sera|será|habra|habrá|aprobar[áa]|publicar[áa]|emitir[áa]|confirmar[áa]|resolver[áa])(?=\s|$)/i.test(question);
 }
 
 function reject(draft: LlmDraft, rejectionReason: string): CriticReviewOutcome {

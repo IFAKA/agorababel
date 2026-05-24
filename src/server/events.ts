@@ -3,6 +3,7 @@ import { methodNotAllowed, readJson, sendError, sendJson } from './http';
 
 const eventNames = new Set([
   'source_submitted',
+  'analysis_rejected',
   'analysis_failed',
   'market_accepted',
   'artifact_opened',
