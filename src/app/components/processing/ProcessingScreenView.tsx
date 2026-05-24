@@ -114,7 +114,6 @@ const stepContentMotion = {
 const MIN_STEP_PROCESSING_MS = 850;
 const MIN_FAILURE_PROCESSING_MS = 1300;
 const MIN_PASTED_SOURCE_LENGTH = 120;
-const SOURCE_ACCEPTED_HANDOFF_MS = 900;
 
 export function ProcessingScreen({
   sourceText,
@@ -141,13 +140,11 @@ export function ProcessingScreen({
   const [errorCopied, setErrorCopied] = useState(false);
   const [selectedStepId, setSelectedStepId] = useState<ProgressStepId | null>(null);
   const [presentedStep, setPresentedStep] = useState<PresentedStepState>({ index: 0, status: 'pending', since: Date.now() });
-  const [sourceAcceptedHandoffComplete, setSourceAcceptedHandoffComplete] = useState(false);
   const reduceMotion = useReducedMotion();
   const hasStarted = runId > 0;
-  const showSourceAccepted = hasStarted && !sourceAcceptedHandoffComplete;
   const presentedSteps = useMemo(
-    () => createPresentedSteps(pipelineRun.steps, hasStarted && !showSourceAccepted ? presentedStep : { index: 0, status: 'pending', since: presentedStep.since }),
-    [hasStarted, pipelineRun.steps, presentedStep, showSourceAccepted],
+    () => createPresentedSteps(pipelineRun.steps, hasStarted ? presentedStep : { index: 0, status: 'pending', since: presentedStep.since }),
+    [hasStarted, pipelineRun.steps, presentedStep],
   );
   const runningStep = presentedSteps.find((step) => step.status === 'running' || step.status === 'failed');
   const activeStep = runningStep ?? [...presentedSteps].reverse().find((step) => step.status === 'complete') ?? presentedSteps[0];
@@ -167,13 +164,13 @@ export function ProcessingScreen({
   const isComplete = pipelineRun.status === 'complete';
   const isRunning = pipelineRun.status === 'running';
   const sourceReadiness = getSourceReadiness(sourceText, isRunning);
-  const progressPipelineSteps = hasStarted && !showSourceAccepted ? pipelineRun.steps : [];
+  const progressPipelineSteps = hasStarted ? presentedSteps : [];
   const progressSteps = useMemo<ProgressStep[]>(() => [
     {
       id: 'source',
       label: 'Source',
       description: hasStarted ? 'The exact submitted article, URL, or pasted text for this run.' : 'Paste an article URL or source text to start.',
-      status: hasStarted && !showSourceAccepted ? 'complete' : hasStarted ? 'running' : 'pending',
+      status: hasStarted ? 'complete' : 'pending',
       selectable: true,
     },
     ...progressPipelineSteps.map((step) => ({
@@ -181,10 +178,10 @@ export function ProcessingScreen({
       label: stepLabels[step.id],
       description: stepDescriptions[step.id],
       status: step.status,
-      selectable: hasStarted && !showSourceAccepted && step.status !== 'pending',
+      selectable: hasStarted && step.status !== 'pending',
     })),
-  ], [hasStarted, progressPipelineSteps, showSourceAccepted]);
-  const selectedProgressStepId: ProgressStepId | undefined = selectedStepId ?? (!hasStarted || showSourceAccepted ? 'source' : displayedStep?.id);
+  ], [hasStarted, progressPipelineSteps]);
+  const selectedProgressStepId: ProgressStepId | undefined = selectedStepId ?? (!hasStarted ? 'source' : displayedStep?.id);
   const handleSelectProgressStep = (stepId: ProgressStepId) => {
     if (stepId === 'source') {
       setSelectedStepId('source');
@@ -193,10 +190,10 @@ export function ProcessingScreen({
 
     const liveStepIndex = pipelineRun.steps.findIndex((item) => item.id === stepId);
     const liveStep = liveStepIndex >= 0 ? pipelineRun.steps[liveStepIndex] : undefined;
-    if (!liveStep || liveStep.status === 'pending') return;
+    const visibleStep = presentedSteps[liveStepIndex];
+    if (!liveStep || !visibleStep || visibleStep.status === 'pending') return;
 
-    if (liveStep.status === 'running' || liveStep.status === 'failed') {
-      setPresentedStep({ index: liveStepIndex, status: liveStep.status, since: Date.now() });
+    if (liveStepIndex >= presentedStep.index) {
       setSelectedStepId(null);
       return;
     }
@@ -208,26 +205,15 @@ export function ProcessingScreen({
     setCopied(false);
     setErrorCopied(false);
     setSelectedStepId(null);
-    setSourceAcceptedHandoffComplete(runId === 0);
     setPresentedStep({ index: 0, status: runId > 0 ? 'running' : 'pending', since: Date.now() });
   }, [pipelineRun.id, runId]);
-
-  useEffect(() => {
-    if (!hasStarted) return;
-
-    const handoffTimeout = window.setTimeout(() => setSourceAcceptedHandoffComplete(true), SOURCE_ACCEPTED_HANDOFF_MS);
-
-    return () => {
-      window.clearTimeout(handoffTimeout);
-    };
-  }, [hasStarted, runId]);
 
   useEffect(() => {
     previousDisplayedStepIndexRef.current = displayedStepIndex;
   }, [displayedStepIndex]);
 
   useEffect(() => {
-    if (!hasStarted || showSourceAccepted || pipelineRun.steps.length === 0) return;
+    if (!hasStarted || pipelineRun.steps.length === 0) return;
 
     const target = getGatedPresentationTarget(pipelineRun, presentedStep);
 
@@ -265,7 +251,7 @@ export function ProcessingScreen({
         : target;
       setPresented(nextTarget.index, nextTarget.status === 'pending' ? 'running' : nextTarget.status);
     }
-  }, [hasStarted, isComplete, pipelineRun, presentedStep, showSourceAccepted]);
+  }, [hasStarted, isComplete, pipelineRun, presentedStep]);
 
   const handleCopy = async () => {
     if (!pipelineRun.acceptedMarket) return;
@@ -310,10 +296,10 @@ export function ProcessingScreen({
               onCopyError={handleCopyError}
               onOpenFinalArtifact={onOpenFinalArtifact}
               isComplete={isComplete}
-              transitionDirection={!hasStarted || showSourceAccepted || (hasStarted && displayedStepIndex === 0 && presentedStep.status === 'running') ? 1 : stepTransitionDirection}
+              transitionDirection={!hasStarted || (hasStarted && displayedStepIndex === 0 && presentedStep.status === 'running') ? 1 : stepTransitionDirection}
               showSourceInput={!hasStarted}
-              showSourceAccepted={hasStarted && (showSourceAccepted || selectedStepId === 'source')}
-              sourceHandoffActive={showSourceAccepted}
+              showSourceAccepted={hasStarted && selectedStepId === 'source'}
+              sourceHandoffActive={false}
             />
           </section>
         </div>
