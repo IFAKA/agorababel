@@ -1551,39 +1551,35 @@ function StepArtifactFrame({
       className={`artifact-card min-w-0 overflow-visible ${className}`}
     >
       {progressRail && <div className="relative z-40 border-b border-[#EEE9DF] bg-[#FBFAF7] px-6 py-4 sm:px-8 lg:px-10">{progressRail}</div>}
-      <div className="relative grid overflow-hidden">
-        <AnimatePresence initial={false} custom={transitionDirection} mode="popLayout">
-          <motion.div
-            key={contentKey ?? title}
-            custom={transitionDirection}
-            initial={reduceMotion ? { opacity: 1 } : 'enter'}
-            animate={reduceMotion ? { opacity: 1 } : 'center'}
-            exit={reduceMotion ? { opacity: 0 } : 'exit'}
-            variants={stepContentMotion}
-            transition={reduceMotion ? { duration: 0.001 } : stepRevealTransition}
-            className="relative z-0 col-start-1 row-start-1 min-w-0 bg-white"
-          >
-            <div className="p-8 sm:p-10">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="eyebrow">{eyebrow}</div>
-                  <h2 className="mt-5 max-w-4xl text-3xl font-semibold leading-tight tracking-normal text-[#171717] sm:text-4xl">
-                    {title}
-                  </h2>
-                </div>
-                {icon && (
-                  <div className="grid size-11 shrink-0 place-items-center rounded-md border border-[#E5E1D8] bg-[#FBFAF7] text-[#292824]">
-                    {icon}
-                  </div>
-                )}
-              </div>
-              {description && <p className="mt-5 max-w-2xl whitespace-pre-line text-lg leading-8 text-[#625F57]">{description}</p>}
-              {children}
+      <AnimatePresence initial={false} custom={transitionDirection} mode="popLayout">
+        <motion.div
+          key={contentKey ?? title}
+          custom={transitionDirection}
+          initial={reduceMotion ? { opacity: 1 } : 'enter'}
+          animate={reduceMotion ? { opacity: 1 } : 'center'}
+          exit={reduceMotion ? { opacity: 0 } : 'exit'}
+          variants={stepContentMotion}
+          transition={reduceMotion ? { duration: 0.001 } : stepRevealTransition}
+          className="relative z-0 min-w-0 overflow-hidden bg-white p-8 sm:p-10"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="eyebrow">{eyebrow}</div>
+              <h2 className="mt-5 max-w-4xl text-3xl font-semibold leading-tight tracking-normal text-[#171717] sm:text-4xl">
+                {title}
+              </h2>
             </div>
-            {footer && <div className="border-t border-[#E5E1D8] bg-[#FBFAF7] p-8 sm:p-10">{footer}</div>}
-          </motion.div>
-        </AnimatePresence>
-      </div>
+            {icon && (
+              <div className="grid size-11 shrink-0 place-items-center rounded-md border border-[#E5E1D8] bg-[#FBFAF7] text-[#292824]">
+                {icon}
+              </div>
+            )}
+          </div>
+          {description && <p className="mt-5 max-w-2xl whitespace-pre-line text-lg leading-8 text-[#625F57]">{description}</p>}
+          {children}
+          {footer && <div className="-mx-8 -mb-8 mt-8 border-t border-[#E5E1D8] bg-[#FBFAF7] p-8 sm:-mx-10 sm:-mb-10 sm:mt-10 sm:p-10">{footer}</div>}
+        </motion.div>
+      </AnimatePresence>
     </motion.section>
   );
 }
