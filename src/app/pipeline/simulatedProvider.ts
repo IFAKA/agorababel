@@ -1,6 +1,8 @@
 import { sampleArticle } from '../sampleArticleData';
+import { applyStageArtifact, createQueuedCanonicalSteps } from './runArtifacts';
 import { appendActivity, appendOperation as appendRunOperation, appendStepReasoning, completeStepOperations, hydrateStep, updateRun, updateStep } from './runState';
-import { createCanonicalPipelineStep, createPipelineStep } from './stages';
+import { canonicalStageOrder } from './stages';
+import type { PipelineStage } from './analysisSchema';
 import type {
   AcceptedMarket,
   AgentRun,
@@ -49,7 +51,7 @@ export class SimulatedPipelineProvider implements PipelineProvider {
     const submission = createSubmission(input.sourceText, input.scenario);
     const resolvedRun = createResolvedPipelineRun(submission.sourceText, submission);
     let run = runAgentPipeline(submission);
-    run = updateRun(run, { status: 'running', steps: createQueuedPipelineSteps() });
+    run = updateRun(run, { status: 'running', steps: createQueuedCanonicalSteps() });
     run = appendActivity(run, 'Source Queue', 'running', 'Preview run started from the bundled source.', 'Log note: this uses prepared preview records and does not call live analysis, Circle, Arc, or x402 services.');
     yield { type: 'run-started', run };
 
@@ -84,7 +86,7 @@ export class SimulatedPipelineProvider implements PipelineProvider {
 
         await wait(SAMPLE_STEP_COMPLETION_DELAY_MS, input.signal);
 
-        run = revealStepArtifacts(run, resolvedRun, step.id);
+        run = applyStageArtifact(run, step.stage, createDemoStageArtifact(resolvedRun, step.stage));
 
         if (step.id === 'settlement') {
           const trace = await this.traceProvider.commit({
@@ -210,7 +212,7 @@ export function createPendingPipelineRun(sourceText: string, submission = create
     candidateMarkets: [],
     criticReviews: [],
     rejectedMarkets: [],
-    steps: createQueuedPipelineSteps(),
+    steps: createQueuedCanonicalSteps(),
     stepOperations: {},
     activityFeed: [
       {
@@ -258,7 +260,7 @@ function createResolvedPipelineRun(sourceText: string, submission = createSubmis
     liveMarketComparison,
     circleAgentWallet,
     x402,
-    steps: createPipelineSteps(ingestion, context, candidateMarkets, criticReviews, acceptedMarket),
+    steps: createPipelineSteps(ingestion, candidateMarkets, criticReviews, acceptedMarket),
     stepOperations: {},
     activityFeed: [
       {
@@ -306,39 +308,61 @@ export function createDemoArtifactRun(): PipelineRun {
   });
 }
 
-function createQueuedPipelineSteps(): PipelineStep[] {
-  return [
-    createCanonicalPipelineStep('extraction'),
-    createPipelineStep('ingestion', 'Source Details', 'Source Details Agent', 'Label the source language, region, actors, and event type.', 'Waiting for readable source.', 'No source metadata prepared yet.'),
-    createCanonicalPipelineStep('claim'),
-    createCanonicalPipelineStep('resolver', { action: 'Check the official page that will decide YES or NO.', outputSummary: 'No official source checked yet.' }),
-    createCanonicalPipelineStep('comparison'),
-    createCanonicalPipelineStep('market-creator'),
-    createCanonicalPipelineStep('critic'),
-    createCanonicalPipelineStep('circle'),
-    createCanonicalPipelineStep('settlement', { outputSummary: 'No proof prepared yet.' }),
-    createCanonicalPipelineStep('x402', { reasoningSnippet: 'Waiting for proof.' }),
-  ];
-}
+function createDemoStageArtifact(resolvedRun: PipelineRun, stage: PipelineStage): unknown {
+  const ingestion = resolvedRun.ingestion;
+  const context = resolvedRun.context;
 
-function revealStepArtifacts(run: PipelineRun, resolvedRun: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
-  if (stepId === 'extraction') return updateRun(run, { extractedSource: resolvedRun.extractedSource });
-  if (stepId === 'ingestion') return updateRun(run, { ingestion: resolvedRun.ingestion });
-  if (stepId === 'claim') return updateRun(run, { context: resolvedRun.context });
-  if (stepId === 'resolver') return updateRun(run, { liveResolver: resolvedRun.liveResolver });
-  if (stepId === 'comparison') return updateRun(run, { liveMarketComparison: resolvedRun.liveMarketComparison });
-  if (stepId === 'market-creator') return updateRun(run, { candidateMarkets: resolvedRun.candidateMarkets, rejectedMarkets: resolvedRun.rejectedMarkets });
-  if (stepId === 'critic') {
-    return updateRun(run, {
-      criticReviews: resolvedRun.criticReviews,
-      rejectedMarkets: resolvedRun.rejectedMarkets,
-      acceptedMarket: resolvedRun.acceptedMarket,
-    });
+  if (stage === 'source-extraction') {
+    return {
+      ...resolvedRun.extractedSource,
+      extractedTextHash: awaitlessShaSeed(resolvedRun.sourceInput),
+    };
   }
-  if (stepId === 'circle') return updateRun(run, { circleAgentWallet: resolvedRun.circleAgentWallet });
-  if (stepId === 'x402') return updateRun(run, { x402: resolvedRun.x402 });
 
-  return run;
+  if (stage === 'claim-extraction') {
+    return {
+      source: {
+        title: resolvedRun.extractedSource?.title,
+        domain: resolvedRun.extractedSource?.domain,
+        url: resolvedRun.extractedSource?.url,
+        language: ingestion?.language,
+        languageConfidence: ingestion?.languageConfidence,
+        publishedAt: ingestion?.sourceDate,
+      },
+      claim: {
+        summary: ingestion?.signalName,
+        region: ingestion?.region,
+        actors: ingestion?.entities ?? [],
+        eventType: ingestion?.topic,
+        deadline: ingestion ? defaultDeadline(ingestion) : undefined,
+        evidence: context?.evidenceSummary ? [{ text: context.evidenceSummary, source: ingestion?.source ?? 'Submitted source' }] : [],
+      },
+      marketRelevance: context?.marketRelevance,
+      relevanceExplanation: context?.relevanceExplanation,
+      evidenceSummary: context?.evidenceSummary,
+    };
+  }
+
+  if (stage === 'resolver-verification') return resolvedRun.liveResolver;
+  if (stage === 'market-comparison') return resolvedRun.liveMarketComparison;
+  if (stage === 'market-drafting') {
+    return {
+      candidateMarkets: resolvedRun.candidateMarkets,
+      rejectedMarkets: resolvedRun.rejectedMarkets,
+    };
+  }
+  if (stage === 'critic-review') {
+    return {
+      criticVerdict: resolvedRun.criticReviews.find((item) => item.decision === 'accepted') ?? resolvedRun.criticReviews[0],
+      criticReviews: resolvedRun.criticReviews,
+      acceptedMarket: resolvedRun.acceptedMarket,
+    };
+  }
+  if (stage === 'circle-wallet') return resolvedRun.circleAgentWallet;
+  if (stage === 'arc-trace-commit') return resolvedRun.trace;
+  if (stage === 'x402-publication') return resolvedRun.x402;
+
+  return {};
 }
 
 function createExtractedSource(sourceInput: string, ingestion: SourceAnalysis): NonNullable<PipelineRun['extractedSource']> {
@@ -863,25 +887,56 @@ function createAcceptedMarket(drafts: MarketQuestion[], reviews: CriticVerdict[]
 
 function createPipelineSteps(
   ingestion: SourceAnalysis,
-  context: ContextAnalysis,
   drafts: MarketQuestion[],
   reviews: CriticVerdict[],
   acceptedMarket: AcceptedMarket,
 ): PipelineStep[] {
   const acceptedCount = reviews.filter((review) => review.decision === 'accepted').length;
+  const resolver = createDemoResolver(ingestion);
+  const comparison = createDemoMarketComparison(ingestion);
+  const summaries: Partial<Record<PipelineStep['id'], Pick<PipelineStep, 'reasoningSnippet' | 'outputSummary'>>> = {
+    extraction: {
+      reasoningSnippet: 'Source text is prepared for review.',
+      outputSummary: 'Source text is ready with a short excerpt for review.',
+    },
+    claim: {
+      reasoningSnippet: `${ingestion.source} detected as a ${ingestion.language} source from ${ingestion.region}; ${ingestion.entities.length} actors and a ${defaultDeadline(ingestion)} deadline mapped.`,
+      outputSummary: `${ingestion.topic} in ${ingestion.region}; deadline ${defaultDeadline(ingestion)}.`,
+    },
+    resolver: {
+      reasoningSnippet: resolver.verificationEvidence,
+      outputSummary: `${resolver.name} checked as the official source.`,
+    },
+    comparison: {
+      reasoningSnippet: comparison.reasoning,
+      outputSummary: 'Question overlap check result: no overlapping question found.',
+    },
+    'market-creator': {
+      reasoningSnippet: `${drafts.length} market drafts generated; the accepted draft resolves on official action.`,
+      outputSummary: `Drafted ${drafts.length} YES/NO markets including "${acceptedMarket.question}"`,
+    },
+    critic: {
+      reasoningSnippet: `${acceptedCount}/${reviews.length} drafts passed the wording, source, deadline, evidence, and question overlap checks.`,
+      outputSummary: acceptedMarket.criticReasoning,
+    },
+    circle: {
+      reasoningSnippet: 'Circle test-wallet record is ready for proof attachment.',
+      outputSummary: `Circle test wallet ready at ${DEMO_WALLET_ADDRESS}.`,
+    },
+    settlement: {
+      reasoningSnippet: 'Proof hash prepared for the accepted market.',
+      outputSummary: 'Proof prepared for preview review.',
+    },
+    x402: {
+      reasoningSnippet: 'Access metadata is prepared for the final artifact.',
+      outputSummary: `Access metadata ready for ${acceptedMarket.id}.`,
+    },
+  };
 
-  return [
-    createPipelineStep('extraction', 'Read Source', 'Source Reader', 'Turn the submitted URL or pasted text into readable source material.', 'Source text is prepared for review.', 'Source text is ready with a short excerpt for review.'),
-    createPipelineStep('ingestion', 'Source Details', 'Source Details Agent', 'Label the source language, region, actors, and event type.', `${ingestion.source} detected as a ${ingestion.language} source from ${ingestion.region}.`, `${ingestion.signalName}; source date ${ingestion.sourceDate}.`),
-    createPipelineStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', `${ingestion.language} source with ${ingestion.entities.length} actors and a ${defaultDeadline(ingestion)} deadline.`, `${ingestion.topic} in ${ingestion.region}; deadline ${defaultDeadline(ingestion)}.`),
-    createPipelineStep('resolver', 'Check Official Source', 'Official Source Checker', 'Find and verify the official page that will decide YES or NO.', createDemoResolver(ingestion).verificationEvidence, `${createDemoResolver(ingestion).name} checked as the official source.`),
-    createPipelineStep('comparison', 'Check Existing Questions', 'Question Overlap Checker', 'Compare against existing betting questions with the same outcome.', createDemoMarketComparison(ingestion).reasoning, 'Question overlap check result: no overlapping question found.'),
-    createPipelineStep('market-creator', 'Write Market', 'Market Writer', 'Write one clear YES/NO market with rules, evidence, and a deadline.', `${drafts.length} market drafts generated; the accepted draft resolves on official action.`, `Drafted ${drafts.length} YES/NO markets including "${acceptedMarket.question}"`),
-    createPipelineStep('critic', 'Quality Check', 'Quality Checker', 'Reject drafts that are vague, duplicated, unsupported, or hard to resolve.', `${acceptedCount}/${reviews.length} drafts passed the wording, source, deadline, evidence, and question overlap checks.`, acceptedMarket.criticReasoning),
-    createPipelineStep('circle', 'Check Wallet', 'Wallet Checker', 'Check the Circle test wallet used to attach a proof record.', 'Circle test-wallet record is ready for proof attachment.', `Circle test wallet ready at ${DEMO_WALLET_ADDRESS}.`),
-    createPipelineStep('settlement', 'Save Proof', 'Proof Saver', 'Save proof of the accepted market on Arc Testnet.', 'Proof hash prepared for the accepted market.', 'Proof prepared for preview review.'),
-    createPipelineStep('x402', 'Publish Access', 'Access Publisher', 'Publish access details for the final paid artifact.', 'Access metadata is prepared for the final artifact.', `Access metadata ready for ${acceptedMarket.id}.`),
-  ];
+  return canonicalStageOrder.map((step) => ({
+    ...step,
+    ...summaries[step.id],
+  }));
 }
 
 function detectEntities(sourceInput: string, region: string, topic: string): string[] {

@@ -1,18 +1,15 @@
 import { AnalysisResultSchema, type AnalysisResult, type PipelineStage } from './analysisSchema';
 import { createPendingPipelineRun, createSubmission } from './simulatedProvider';
+import { applyStageArtifact, createQueuedCanonicalSteps, createRunFromAnalysis, toClientTraceFromArcTrace } from './runArtifacts';
 import { appendActivity, appendOperation, appendStepReasoning, compactMetadata, completeStepOperations, failStepOperations, updateRun, updateStep, updateStepText } from './runState';
 import { canonicalStageOrder, labelForStep, stepIdForStage } from './stages';
 import type {
-  AcceptedMarket,
-  ArcTrace,
-  ContextAnalysis,
   PipelineInput,
   PipelineErrorBrief,
   PipelineProvider,
   PipelineRun,
   PipelineRunUpdate,
   PipelineStep,
-  SourceAnalysis,
 } from './types';
 
 const STAGE_PACING_ENABLED = import.meta.env.VITE_DEMO_PACING === 'true';
@@ -35,7 +32,7 @@ export class ApiPipelineProvider implements PipelineProvider {
     const submission = createSubmission(input.sourceText);
     let run = updateRun(createPendingPipelineRun(submission.sourceText, submission), {
       status: 'running',
-      steps: stageOrder,
+      steps: createQueuedCanonicalSteps(),
     });
 
     emitProductEvent('source_submitted', { runId: run.id, sourceType: looksLikeUrl(input.sourceText) ? 'url' : 'text' });
@@ -98,7 +95,7 @@ export class ApiPipelineProvider implements PipelineProvider {
 
         if (event.type === 'step-completed') {
           const stepId = stepIdForStage(event.stage);
-          run = revealStreamArtifact(run, event.stage, event.artifact);
+          run = applyStageArtifact(run, event.stage, event.artifact);
           run = updateStepText(run, stepId, { outputSummary: event.message });
           run = completeStepOperations(run, stepId);
           run = updateStep(run, stepId, 'complete');
@@ -377,106 +374,6 @@ function parseSseFrame(frame: string): StreamEvent | null {
   }
 }
 
-function revealStreamArtifact(run: PipelineRun, stage: PipelineStage, artifact: unknown): PipelineRun {
-  const value = isRecord(artifact) ? artifact : {};
-
-  if (stage === 'source-extraction') {
-    const url = typeof value.url === 'string' ? value.url : '';
-    const title = typeof value.title === 'string' ? value.title : 'Submitted source';
-    const domain = typeof value.domain === 'string' ? value.domain : url ? new URL(url).hostname : 'Pasted source';
-
-    return updateRun(run, {
-      extractedSource: {
-        title,
-        domain,
-        url,
-        text: typeof value.extractedTextHash === 'string' ? `Extracted text hash ${value.extractedTextHash.slice(0, 12)}...` : 'Source extracted.',
-      },
-    });
-  }
-
-  if (stage === 'claim-extraction') {
-    const claim = isRecord(value.claim) ? value.claim : {};
-    const source = isRecord(value.source) ? value.source : {};
-    const evidence = Array.isArray(claim.evidence)
-      ? claim.evidence.filter(isRecord).map((item) => String(item.text ?? '')).filter(Boolean).join(' ')
-      : '';
-
-    return updateRun(run, {
-      ingestion: {
-        signalName: String(claim.summary ?? 'Claim extracted'),
-        language: String(source.language ?? 'Unknown'),
-        languageConfidence: 100,
-        source: run.extractedSource?.domain ?? 'Submitted source',
-        sourceUrl: run.extractedSource?.url || undefined,
-        sourceDate: typeof source.publishedAt === 'string' ? source.publishedAt.slice(0, 10) : 'Unpublished or unavailable',
-        entities: Array.isArray(claim.actors) ? claim.actors.map(String) : [],
-        region: String(claim.region ?? 'Unknown'),
-        topic: String(claim.eventType ?? 'Event'),
-      },
-      context: {
-        englishSummary: String(claim.summary ?? 'Claim extracted.'),
-        marketRelevance: 'Medium',
-        relevanceExplanation: 'The main claim has the fields needed for a market. Question overlap checking is still pending.',
-        evidenceSummary: evidence,
-      },
-    });
-  }
-
-  if (stage === 'market-drafting') {
-    const candidateMarkets = Array.isArray(value.candidateMarkets) ? value.candidateMarkets.map(toClientMarket) : run.candidateMarkets;
-    const rejectedMarkets = Array.isArray(value.rejectedMarkets)
-      ? value.rejectedMarkets as PipelineRun['rejectedMarkets']
-      : run.rejectedMarkets;
-    return updateRun(run, { candidateMarkets, rejectedMarkets });
-  }
-
-  if (stage === 'resolver-discovery') {
-    return updateRun(run, { resolverDiscovery: value as PipelineRun['resolverDiscovery'] });
-  }
-
-  if (stage === 'resolver-verification') {
-    return updateRun(run, { liveResolver: value as PipelineRun['liveResolver'] });
-  }
-
-  if (stage === 'market-comparison') {
-    return updateRun(run, {
-      liveMarketComparison: value as PipelineRun['liveMarketComparison'],
-      context: run.context ? {
-        ...run.context,
-        marketRelevance: value.noveltyVerdict === 'new-opportunity' ? 'High' : 'Low',
-        relevanceExplanation: String(value.reasoning ?? run.context.relevanceExplanation),
-      } : run.context,
-    });
-  }
-
-  if (stage === 'critic-review') {
-    const criticVerdict = isRecord(value.criticVerdict) ? value.criticVerdict as PipelineRun['criticReviews'][number] : undefined;
-    const acceptedMarket = isRecord(value.acceptedMarket)
-      ? { ...toClientMarket(value.acceptedMarket as AnalysisResult['candidateMarkets'][number]), criticReasoning: criticVerdict?.reasoning ?? 'Critic verdict accepted.' }
-      : undefined;
-
-    return updateRun(run, {
-      criticReviews: criticVerdict ? [criticVerdict] : run.criticReviews,
-      acceptedMarket,
-    });
-  }
-
-  if (stage === 'circle-wallet') {
-    return updateRun(run, { circleAgentWallet: value as PipelineRun['circleAgentWallet'] });
-  }
-
-  if (stage === 'arc-trace-commit') {
-    return updateRun(run, { trace: toClientTraceFromArcTrace(value as NonNullable<AnalysisResult['arcTrace']>) });
-  }
-
-  if (stage === 'x402-publication') {
-    return updateRun(run, { x402: value as PipelineRun['x402'] });
-  }
-
-  return run;
-}
-
 function stageCompletionReasoning(stage: PipelineStage, artifact: unknown) {
   const value = isRecord(artifact) ? artifact : {};
 
@@ -501,155 +398,8 @@ function stageCompletionReasoning(stage: PipelineStage, artifact: unknown) {
   return 'Backend stage completed.';
 }
 
-function toClientTraceFromArcTrace(trace: NonNullable<AnalysisResult['arcTrace']>): ArcTrace {
-  return {
-    traceHash: trace.artifactHash,
-    transactionId: trace.transactionHash,
-    network: `${trace.network} (${trace.chainId})`,
-    status: trace.status,
-    timestamp: trace.committedAt,
-    explorerUrl: trace.explorerUrl,
-    artifactHash: trace.artifactHash,
-    sourceHash: trace.sourceHash,
-    chainId: trace.chainId,
-  };
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function createRunFromAnalysis(run: PipelineRun, analysis: AnalysisResult, analyzedInMs: number): PipelineRun {
-  const ingestion = createSourceAnalysis(analysis);
-  const context = createContextAnalysis(analysis);
-  const acceptedMarket: AcceptedMarket | undefined = analysis.acceptedMarket
-    ? { ...toClientMarket(analysis.acceptedMarket), criticReasoning: analysis.criticVerdict.reasoning }
-    : undefined;
-  const trace = analysis.arcTrace ? toClientTrace(analysis) : undefined;
-
-  return updateRun(run, {
-    id: analysis.runId,
-    extractedSource: analysis.source.url ? {
-      title: analysis.source.title,
-      domain: analysis.source.domain ?? new URL(analysis.source.url).hostname,
-      url: analysis.source.url,
-      text: analysis.claim.evidence.map((item) => item.text).join('\n\n'),
-    } : undefined,
-    ingestion,
-    context,
-    candidateMarkets: analysis.candidateMarkets.map(toClientMarket),
-    criticReviews: [analysis.criticVerdict],
-    rejectedMarkets: analysis.rejectedMarkets,
-    acceptedMarket,
-    trace,
-    circleAgentWallet: analysis.circleAgentWallet,
-    x402: analysis.x402,
-    analysis,
-    analyzedInMs,
-    steps: createPipelineSteps(analysis),
-  });
-}
-
-function createSourceAnalysis(analysis: AnalysisResult): SourceAnalysis {
-  return {
-    signalName: analysis.acceptedMarket?.question ?? analysis.claim.summary,
-    language: analysis.source.language,
-    languageConfidence: 100,
-    source: analysis.source.domain ?? analysis.source.title,
-    sourceUrl: analysis.source.url ?? undefined,
-    sourceDate: analysis.source.publishedAt?.slice(0, 10) ?? 'Unpublished or unavailable',
-    entities: analysis.claim.actors,
-    region: analysis.claim.region,
-    topic: analysis.claim.eventType,
-  };
-}
-
-function createContextAnalysis(analysis: AnalysisResult): ContextAnalysis {
-  return {
-    englishSummary: analysis.claim.summary,
-    marketRelevance: analysis.status === 'accepted' ? 'High' : 'Low',
-    relevanceExplanation: analysis.marketComparison?.reasoning ?? analysis.rejectionReason ?? 'No market comparison ran.',
-    evidenceSummary: analysis.claim.evidence.map((item) => item.text).join(' '),
-  };
-}
-
-function createPipelineSteps(analysis: AnalysisResult): PipelineStep[] {
-  const failedStage = analysis.status === 'rejected' ? analysis.stage : null;
-  const failedStepId = failedStage ? stepIdForStage(failedStage) : null;
-  const failedIndex = failedStepId ? stageOrder.findIndex((step) => step.id === failedStepId) : -1;
-  return stageOrder.map((step) => {
-    const stepIndex = stageOrder.findIndex((item) => item.id === step.id);
-    const status = failedIndex === -1 ? 'complete' : stepIndex < failedIndex ? 'complete' : stepIndex === failedIndex ? 'failed' : 'pending';
-    return {
-      ...step,
-      status,
-      reasoningSnippet: outputForStage(analysis, step.stage, 'reasoning'),
-      outputSummary: outputForStage(analysis, step.stage, 'summary'),
-    };
-  });
-}
-
-function outputForStage(analysis: AnalysisResult, stage: PipelineStage, mode: 'reasoning' | 'summary') {
-  switch (stage) {
-    case 'source-extraction':
-      return mode === 'summary'
-        ? `${analysis.source.title}${analysis.source.domain ? ` from ${analysis.source.domain}` : ''}.`
-        : `${analysis.source.inputType.toUpperCase()} input hashed as ${analysis.source.extractedTextHash.slice(0, 12)}...`;
-    case 'claim-extraction':
-      return mode === 'summary'
-        ? `${analysis.claim.eventType} in ${analysis.claim.region}; deadline ${analysis.claim.deadline}.`
-        : analysis.claim.summary;
-    case 'resolver-discovery':
-      return mode === 'summary'
-        ? analysis.resolver ? `${analysis.resolver.name} discovered.` : 'No official resolver found.'
-        : analysis.rejectionReason ?? analysis.resolver?.verificationEvidence ?? 'Official resolver discovery completed.';
-    case 'resolver-verification':
-      return mode === 'summary' ? `${analysis.resolver?.name ?? 'No resolver'} verified.` : analysis.resolver?.verificationEvidence ?? analysis.rejectionReason ?? 'No resolver verified.';
-    case 'market-comparison':
-      return mode === 'summary'
-        ? `Question overlap check: ${analysis.marketComparison?.noveltyVerdict === 'new-opportunity' ? 'no overlapping question found' : analysis.marketComparison?.noveltyVerdict ?? 'not checked'}.`
-        : analysis.marketComparison?.reasoning ?? 'Question overlap check did not run.';
-    case 'market-drafting':
-      return mode === 'summary' ? analysis.candidateMarkets[0]?.question ?? 'No candidate market.' : `${analysis.rejectedMarkets.length} rejected alternatives retained.`;
-    case 'critic-review':
-      return analysis.criticVerdict.reasoning;
-    case 'circle-wallet':
-      return mode === 'summary'
-        ? `Circle wallet ${analysis.circleAgentWallet.status}.`
-        : analysis.circleAgentWallet.address ?? analysis.circleAgentWallet.error ?? 'No wallet proof.';
-    case 'arc-trace-commit':
-      return mode === 'summary'
-        ? analysis.arcTrace ? `Proof saved ${analysis.arcTrace.transactionHash.slice(0, 14)}...` : 'Arc proof missing.'
-        : analysis.arcTrace?.artifactHash ?? 'No proof hash saved.';
-    case 'x402-publication':
-      return mode === 'summary'
-        ? analysis.x402 ? `Access ${analysis.x402.status} at ${analysis.x402.intelligenceUrl}.` : 'Access publication missing.'
-        : analysis.x402?.payToAddress ?? 'No payment address configured.';
-    default:
-      return analysis.rejectionReason ?? 'Pipeline completed.';
-  }
-}
-
-function toClientMarket(market: AnalysisResult['candidateMarkets'][number]) {
-  return {
-    ...market,
-    resolutionSource: `${market.resolverName} (${market.resolverUrl})`,
-  };
-}
-
-function toClientTrace(analysis: AnalysisResult): ArcTrace | undefined {
-  if (!analysis.arcTrace) return undefined;
-  return {
-    traceHash: analysis.arcTrace.artifactHash,
-    transactionId: analysis.arcTrace.transactionHash,
-    network: `${analysis.arcTrace.network} (${analysis.arcTrace.chainId})`,
-    status: analysis.arcTrace.status,
-    timestamp: analysis.arcTrace.committedAt,
-    explorerUrl: analysis.arcTrace.explorerUrl,
-    artifactHash: analysis.arcTrace.artifactHash,
-    sourceHash: analysis.arcTrace.sourceHash,
-    chainId: analysis.arcTrace.chainId,
-  };
 }
 
 function markStepsThroughFailure(run: PipelineRun, failedStepId: PipelineStep['id']) {

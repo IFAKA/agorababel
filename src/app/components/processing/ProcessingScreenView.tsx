@@ -221,6 +221,13 @@ export function ProcessingScreen({
       setPresentedStep({ index, status, since: Date.now() });
     };
 
+    if (isComplete && pipelineRun.acceptedMarket && pipelineRun.steps[target.index]?.id === 'x402') {
+      if (presentedStep.index !== target.index || presentedStep.status !== 'complete') {
+        setPresented(target.index, 'complete');
+      }
+      return;
+    }
+
     if (target.index > presentedStep.index && presentedStep.status !== 'complete') {
       const currentRawStep = pipelineRun.steps[presentedStep.index];
 
@@ -1116,6 +1123,15 @@ function createArtifactView({
         return createPendingArtifactView(activeStep, 'Structured claim extraction is running.');
       }
 
+      const submittedSource = getSubmittedSourceForRun(pipelineRun);
+      const detectedSource = pipelineRun.extractedSource?.domain ?? ingestion.source;
+      const sourceFields = [
+        ['Language', `${ingestion.language} (${formatLanguageConfidence(ingestion.languageConfidence)})`],
+        ['Detected source', detectedSource],
+        ['Region', ingestion.region],
+        ['Source date', ingestion.sourceDate],
+      ];
+
       return {
         key: activeStep.id,
         step: activeStep,
@@ -1143,6 +1159,21 @@ function createArtifactView({
               <p className="mt-3 text-base leading-7 text-[#292824]">
                 {pipelineRun.analysis?.claim.evidence.map((item) => `${item.text} (${item.source})`).join(' ') ?? context.evidenceSummary}
               </p>
+            </StepReveal>
+            <StepReveal index={5}>
+              <details className="rounded-md border border-[#E5E1D8] bg-white p-4">
+                <summary className="cursor-pointer select-none text-sm font-semibold uppercase leading-5 tracking-[0.08em] text-[#625F57]">
+                  Source Details
+                </summary>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {sourceFields.map(([label, value]) => (
+                    <ArtifactField key={label} label={label} value={value || 'Not available'} />
+                  ))}
+                </div>
+                <div className="mt-4">
+                  <SubmittedSourceBlock sourceText={submittedSource} />
+                </div>
+              </details>
             </StepReveal>
           </div>
         ),
@@ -1499,6 +1530,7 @@ function createArtifactView({
         ),
         footer: (
           <div className="grid gap-5">
+            <NaiveComparisonPanel pipelineRun={pipelineRun} />
             <div className="grid gap-6 sm:grid-cols-2">
               <StepReveal>
                 <Criteria label="YES" value={market.yesCriteria} />
@@ -2019,6 +2051,22 @@ function CriticChecks({ checks }: { checks: CriticVerdict['checks'] }) {
   );
 }
 
+function NaiveComparisonPanel({ pipelineRun }: { pipelineRun: PipelineRun }) {
+  const comparison = getNaiveComparison(pipelineRun);
+
+  if (!comparison) return null;
+
+  return (
+    <StepReveal className="rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+      <div className="eyebrow">Naive output vs AgoraBabel artifact</div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <ArtifactField label="Naive output" value={comparison.naiveOutput} />
+        <ArtifactField label="AgoraBabel artifact" value={comparison.artifact} />
+      </div>
+    </StepReveal>
+  );
+}
+
 function FinalArtifact({
   pipelineRun,
   step,
@@ -2218,7 +2266,7 @@ function getNormalizedClaim(ingestion: SourceAnalysis): string {
 
   if (ingestion.region === 'Chile') {
     if (ingestion.topic.includes('CEOL')) {
-      return 'Laguna Verde CEOL terms are agreed, but official government ratification and Contraloria review remain pending.';
+      return 'Laguna Verde CEOL terms agreed; ratification still pending official government and Contraloria review.';
     }
 
     return 'Chile may publish an official lithium extraction permit decision before the stated deadline.';
@@ -2229,6 +2277,25 @@ function getNormalizedClaim(ingestion: SourceAnalysis): string {
   }
 
   return `${ingestion.region} may officially confirm ${ingestion.topic.toLowerCase()} before the stated deadline.`;
+}
+
+function getNaiveComparison(run: PipelineRun): { naiveOutput: string; artifact: string } | null {
+  const ingestion = run.ingestion;
+  const market = run.acceptedMarket;
+
+  if (!ingestion || !market) return null;
+
+  if (ingestion.region === 'Chile' && ingestion.topic.includes('CEOL')) {
+    return {
+      naiveOutput: 'Will Chile approve the Laguna Verde lithium deal by June 30, 2026?',
+      artifact: getNormalizedClaim(ingestion),
+    };
+  }
+
+  return {
+    naiveOutput: `Will ${ingestion.region} ${ingestion.topic.toLowerCase()} happen by the deadline?`,
+    artifact: market.question,
+  };
 }
 
 function createPresentedSteps(steps: PipelineStep[], presentedStep: PresentedStepState): PipelineStep[] {

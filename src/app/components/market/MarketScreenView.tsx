@@ -227,6 +227,8 @@ export function MarketScreen({
 
                 <MarketBalancePanel marketBalance={market.marketBalance} />
 
+                <NaiveComparisonPanel pipelineRun={pipelineRun} />
+
                 <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 border-t border-[#E5E1D8] pt-4 sm:grid-cols-2">
                   <ReportField label="Deadline" value={market.deadline} />
                   <ReportField label="Resolution source" value={market.resolutionSource} />
@@ -478,6 +480,26 @@ function ProofPanel({ title, children }: { title: string; children: ReactNode })
   );
 }
 
+function NaiveComparisonPanel({ pipelineRun }: { pipelineRun: PipelineRun }) {
+  const comparison = getNaiveComparison(pipelineRun);
+
+  if (!comparison) return null;
+
+  return (
+    <section className="border-t border-[#E5E1D8] pt-4">
+      <div className="eyebrow">Naive output vs AgoraBabel artifact</div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <ProofPanel title="Naive output">
+          <p className="text-sm font-semibold leading-6 text-[#292824]">{comparison.naiveOutput}</p>
+        </ProofPanel>
+        <ProofPanel title="AgoraBabel artifact">
+          <p className="text-sm font-semibold leading-6 text-[#292824]">{comparison.artifact}</p>
+        </ProofPanel>
+      </div>
+    </section>
+  );
+}
+
 function MarketBalancePanel({ marketBalance }: { marketBalance: NonNullable<PipelineRun['acceptedMarket']>['marketBalance'] }) {
   const yes = marketBalance.yesProbability;
   const no = marketBalance.noProbability;
@@ -543,6 +565,25 @@ function getRejectedMarkets(pipelineRun: PipelineRun) {
         violatedRule: review?.violatedRule ?? 'ambiguity' as const,
       };
     });
+}
+
+function getNaiveComparison(run: PipelineRun): { naiveOutput: string; artifact: string } | null {
+  const ingestion = run.ingestion;
+  const market = run.acceptedMarket;
+
+  if (!ingestion || !market) return null;
+
+  if (ingestion.region === 'Chile' && ingestion.topic.includes('CEOL')) {
+    return {
+      naiveOutput: 'Will Chile approve the Laguna Verde lithium deal by June 30, 2026?',
+      artifact: 'Laguna Verde CEOL terms agreed; ratification still pending official government and Contraloria review.',
+    };
+  }
+
+  return {
+    naiveOutput: `Will ${ingestion.region} ${ingestion.topic.toLowerCase()} happen by the deadline?`,
+    artifact: market.question,
+  };
 }
 
 function createOperatorMemo({
