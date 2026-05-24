@@ -183,6 +183,30 @@ export function getCompletedStepDwellMs(run: PipelineRun, step?: PipelineStep): 
   return getStepDwellMs(getStepPresentationText(run, step));
 }
 
+export function getGatedPresentationTarget(run: PipelineRun, current: PresentedStepState): { index: number; status: PipelineStepStatus } {
+  const target = getPresentationTarget(run);
+
+  if (target.index <= current.index) {
+    return target;
+  }
+
+  for (let index = current.index; index < target.index; index += 1) {
+    const step = run.steps[index];
+
+    if (!step) break;
+
+    if (step.status === 'failed') {
+      return { index, status: 'failed' };
+    }
+
+    if (step.status !== 'complete' || !areStepOperationsReadyToAdvance(run, step.id)) {
+      return { index, status: step.status === 'pending' ? 'running' : step.status };
+    }
+  }
+
+  return target;
+}
+
 export function getStepPresentationText(run: PipelineRun, step?: PipelineStep): string {
   if (!step) return '';
 
@@ -350,4 +374,66 @@ export function getOneStepPresentationTarget(
   if (nextStep.status === 'pending') return { index: nextIndex, status: 'running' };
 
   return { index: nextIndex, status: nextStep.status };
+}
+
+function getPresentationTarget(run: PipelineRun): { index: number; status: PipelineStepStatus } {
+  const failedStepIndex = run.steps.findIndex((step) => step.status === 'failed');
+
+  if (failedStepIndex >= 0) {
+    return { index: failedStepIndex, status: 'failed' };
+  }
+
+  if (run.status === 'failed') {
+    const errorStage = run.errorBrief?.stage;
+    const errorStepIndex = errorStage && isPipelineStepId(errorStage)
+      ? run.steps.findIndex((step) => step.id === errorStage)
+      : -1;
+    const firstIncompleteIndex = run.steps.findIndex((step) => step.status !== 'complete');
+    const fallbackIndex = firstIncompleteIndex >= 0 ? firstIncompleteIndex : Math.max(run.steps.length - 1, 0);
+
+    return {
+      index: errorStepIndex >= 0 ? errorStepIndex : fallbackIndex,
+      status: 'failed',
+    };
+  }
+
+  const runningStepIndex = run.steps.findIndex((step) => step.status === 'running');
+
+  if (runningStepIndex >= 0) {
+    return { index: runningStepIndex, status: 'running' };
+  }
+
+  if (run.status === 'complete' || run.status === 'trace-committed') {
+    return { index: Math.max(run.steps.length - 1, 0), status: 'complete' };
+  }
+
+  const lastCompleteIndex = getLastCompleteStepIndex(run.steps);
+
+  if (lastCompleteIndex >= 0) {
+    return { index: lastCompleteIndex, status: 'complete' };
+  }
+
+  return { index: 0, status: run.status === 'running' ? 'running' : 'pending' };
+}
+
+export function areStepOperationsReadyToAdvance(run: PipelineRun, stepId: PipelineStep['id']): boolean {
+  const operations = run.stepOperations[stepId] ?? [];
+
+  if (operations.length === 0) {
+    return true;
+  }
+
+  return operations.every((operation) => operation.status === 'complete' || operation.status === 'info');
+}
+
+function isPipelineStepId(value: string): value is PipelineStep['id'] {
+  return ['extraction', 'ingestion', 'context', 'claim', 'resolver', 'comparison', 'market-creator', 'critic', 'circle', 'settlement', 'x402'].includes(value);
+}
+
+function getLastCompleteStepIndex(steps: PipelineStep[]): number {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    if (steps[index].status === 'complete') return index;
+  }
+
+  return -1;
 }

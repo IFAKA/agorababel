@@ -5,9 +5,11 @@ import {
   getCompactOperationDwellMs,
   getCompactOperationReadableText,
   getCompletedStepDwellMs,
+  getGatedPresentationTarget,
   getOneStepPresentationTarget,
   getOperationDwellMs,
   getOperationReadableText,
+  getStepDwellMs,
   getStepPresentationText,
   MAX_COMPLETED_STEP_DWELL_MS,
   MAX_OPERATION_DWELL_MS,
@@ -15,6 +17,7 @@ import {
   MIN_OPERATION_DWELL_MS,
   type PresentedStepState,
 } from '../app/pipeline/presentationTiming.ts';
+import { getArtifactReadableText } from '../app/pipeline/artifactReadableText.ts';
 import type { PipelineRun, PipelineStep } from '../app/pipeline/types.ts';
 
 test('operation readable text includes visible row content and metadata only', () => {
@@ -116,6 +119,24 @@ test('presentation target advances one completed step at a time', () => {
   });
 });
 
+test('completed run presentation target remains gated by presented step', () => {
+  const run = createMinimalRun();
+  run.status = 'complete';
+  run.steps = run.steps.map((step) => ({ ...step, status: 'complete' }));
+
+  const current: PresentedStepState = { index: 0, status: 'complete', since: Date.now() };
+
+  assert.deepEqual(getGatedPresentationTarget(run, current), {
+    index: 4,
+    status: 'complete',
+  });
+
+  assert.deepEqual(getOneStepPresentationTarget(run, current, getGatedPresentationTarget(run, current)), {
+    index: 1,
+    status: 'complete',
+  });
+});
+
 test('short completed step text clamps to minimum dwell', () => {
   const run = createMinimalRun();
   const step = run.steps[0];
@@ -159,7 +180,7 @@ test('completed step dwell adapts to dynamic visible artifact text within bounds
   const step = run.steps.find((item) => item.id === 'resolver');
   assert.ok(step);
 
-  const briefDwell = getCompletedStepDwellMs(run, step);
+  const briefDwell = getStepDwellMs(getArtifactReadableText(run, step));
 
   run.liveResolver = {
     name: 'Official Gazette',
@@ -168,11 +189,14 @@ test('completed step dwell adapts to dynamic visible artifact text within bounds
     verificationEvidence: Array.from({ length: 28 }, (_, index) => `evidence${index}`).join(' '),
   };
 
-  const detailedDwell = getCompletedStepDwellMs(run, step);
+  const detailedText = getArtifactReadableText(run, step);
+  const detailedDwell = getStepDwellMs(detailedText);
 
   assert.ok(briefDwell >= MIN_COMPLETED_STEP_DWELL_MS);
   assert.ok(detailedDwell <= MAX_COMPLETED_STEP_DWELL_MS);
   assert.ok(detailedDwell > briefDwell);
+  assert.match(detailedText, /Official source URL/);
+  assert.doesNotMatch(detailedText, /source119/);
 });
 
 test('step presentation text excludes hidden payloads and full hashes', () => {

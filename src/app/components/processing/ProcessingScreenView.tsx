@@ -27,11 +27,14 @@ import {
 } from '../../artifactHelpers';
 import { pipelineStepDescriptions as stepDescriptions, pipelineStepLabels as stepLabels } from '../../pipeline/stages';
 import {
+  areStepOperationsReadyToAdvance,
   clamp,
-  getCompletedStepDwellMs,
+  getGatedPresentationTarget,
   getOneStepPresentationTarget,
+  getStepDwellMs,
   type PresentedStepState,
 } from '../../pipeline/presentationTiming';
+import { getArtifactReadableText } from '../../pipeline/artifactReadableText';
 import type { CriticVerdict, MarketQuestion, PipelineRun, PipelineStep, PipelineStepStatus, SourceAnalysis } from '../../pipeline/types';
 import { pageContainerClassName } from '../pageLayout';
 
@@ -64,6 +67,15 @@ type ArtifactView = {
   body?: ReactNode;
   footer?: ReactNode;
   className?: string;
+  readableText?: string;
+};
+type ArtifactViewInput = {
+  pipelineRun: PipelineRun;
+  activeStep?: PipelineStep;
+  copied: boolean;
+  onCopy: () => void;
+  onOpenFinalArtifact: () => void;
+  isComplete: boolean;
 };
 
 const stepRevealTransition = {
@@ -134,14 +146,8 @@ export function ProcessingScreen({
   const hasStarted = runId > 0;
   const showSourceAccepted = hasStarted && !sourceAcceptedHandoffComplete;
   const presentedSteps = useMemo(
-    () => {
-      if (hasStarted && !showSourceAccepted && (pipelineRun.status === 'complete' || pipelineRun.status === 'trace-committed')) {
-        return pipelineRun.steps.map((step) => ({ ...step, status: 'complete' as const }));
-      }
-
-      return createPresentedSteps(pipelineRun.steps, hasStarted && !showSourceAccepted ? presentedStep : { index: 0, status: 'pending', since: presentedStep.since });
-    },
-    [hasStarted, pipelineRun.status, pipelineRun.steps, presentedStep, showSourceAccepted],
+    () => createPresentedSteps(pipelineRun.steps, hasStarted && !showSourceAccepted ? presentedStep : { index: 0, status: 'pending', since: presentedStep.since }),
+    [hasStarted, pipelineRun.steps, presentedStep, showSourceAccepted],
   );
   const runningStep = presentedSteps.find((step) => step.status === 'running' || step.status === 'failed');
   const activeStep = runningStep ?? [...presentedSteps].reverse().find((step) => step.status === 'complete') ?? presentedSteps[0];
@@ -161,6 +167,7 @@ export function ProcessingScreen({
   const isComplete = pipelineRun.status === 'complete';
   const isRunning = pipelineRun.status === 'running';
   const sourceReadiness = getSourceReadiness(sourceText, isRunning);
+  const progressPipelineSteps = hasStarted && !showSourceAccepted ? pipelineRun.steps : [];
   const progressSteps = useMemo<ProgressStep[]>(() => [
     {
       id: 'source',
@@ -169,14 +176,14 @@ export function ProcessingScreen({
       status: hasStarted && !showSourceAccepted ? 'complete' : hasStarted ? 'running' : 'pending',
       selectable: true,
     },
-    ...presentedSteps.map((step) => ({
+    ...progressPipelineSteps.map((step) => ({
       id: step.id,
       label: stepLabels[step.id],
       description: stepDescriptions[step.id],
       status: step.status,
       selectable: hasStarted && !showSourceAccepted && step.status !== 'pending',
     })),
-  ], [hasStarted, presentedSteps, showSourceAccepted]);
+  ], [hasStarted, progressPipelineSteps, showSourceAccepted]);
   const selectedProgressStepId: ProgressStepId | undefined = selectedStepId ?? (!hasStarted || showSourceAccepted ? 'source' : displayedStep?.id);
   const handleSelectProgressStep = (stepId: ProgressStepId) => {
     if (stepId === 'source') {
@@ -184,7 +191,7 @@ export function ProcessingScreen({
       return;
     }
 
-    const step = presentedSteps.find((item) => item.id === stepId);
+    const step = progressPipelineSteps.find((item) => item.id === stepId);
     if (step?.status !== 'pending') setSelectedStepId(stepId);
   };
 
@@ -230,7 +237,8 @@ export function ProcessingScreen({
 
     if (target.index > presentedStep.index && presentedStep.status === 'complete') {
       const currentStep = pipelineRun.steps[presentedStep.index];
-      const remainingDwellMs = Math.max(getCompletedStepDwellMs(pipelineRun, currentStep) - (Date.now() - presentedStep.since), 0);
+      const readableText = getArtifactReadableText(pipelineRun, currentStep, isComplete);
+      const remainingDwellMs = Math.max(getStepDwellMs(readableText) - (Date.now() - presentedStep.since), 0);
 
       if (remainingDwellMs > 0) {
         const timeout = window.setTimeout(() => {
@@ -248,7 +256,7 @@ export function ProcessingScreen({
         : target;
       setPresented(nextTarget.index, nextTarget.status === 'pending' ? 'running' : nextTarget.status);
     }
-  }, [hasStarted, pipelineRun, presentedStep, showSourceAccepted]);
+  }, [hasStarted, isComplete, pipelineRun, presentedStep, showSourceAccepted]);
 
   const handleCopy = async () => {
     if (!pipelineRun.acceptedMarket) return;
@@ -912,6 +920,7 @@ function getSourceInputView({
     key: 'source-input',
     eyebrow: 'Source',
     title: 'Source analysis is ready.',
+    readableText: 'Source Source analysis is ready.',
     icon: <FileText aria-hidden="true" size={18} />,
     body: (
       <SourceInput
@@ -936,6 +945,16 @@ function getSourceAcceptedView(pipelineRun: PipelineRun, fallbackSourceText: str
     eyebrow: 'Source',
     title: 'Submitted source.',
     description: handoffActive ? 'Queued' : undefined,
+    readableText: [
+      'Source',
+      'Submitted source.',
+      handoffActive ? 'Queued' : undefined,
+      'Submitted source',
+      sourceKind,
+      extracted ? `Detected: ${extracted.domain}` : undefined,
+      submittedSource,
+      handoffActive ? 'Running' : undefined,
+    ].filter(Boolean).join(' '),
     icon: handoffActive
       ? <LoaderCircle aria-hidden="true" className={reduceMotion ? '' : 'animate-spin'} size={18} />
       : <FileText aria-hidden="true" size={18} />,
@@ -983,21 +1002,23 @@ function getSourceAcceptedView(pipelineRun: PipelineRun, fallbackSourceText: str
   };
 }
 
-function getArtifactView({
+function getArtifactView(args: ArtifactViewInput): ArtifactView {
+  const view = createArtifactView(args);
+
+  return {
+    ...view,
+    readableText: getArtifactReadableText(args.pipelineRun, args.activeStep, args.isComplete),
+  };
+}
+
+function createArtifactView({
   pipelineRun,
   activeStep,
   copied,
   onCopy,
   onOpenFinalArtifact,
   isComplete,
-}: {
-  pipelineRun: PipelineRun;
-  activeStep?: PipelineStep;
-  copied: boolean;
-  onCopy: () => void;
-  onOpenFinalArtifact: () => void;
-  isComplete: boolean;
-}): ArtifactView {
+}: ArtifactViewInput): ArtifactView {
   if (!activeStep) {
     return {
       key: 'preparing',
@@ -2217,96 +2238,6 @@ function createPresentedSteps(steps: PipelineStep[], presentedStep: PresentedSte
     if (index === presentedStep.index) return { ...step, status: presentedStep.status };
     return { ...step, status: 'pending' };
   });
-}
-
-function getPresentationTarget(run: PipelineRun): { index: number; status: PipelineStepStatus } {
-  const failedStepIndex = run.steps.findIndex((step) => step.status === 'failed');
-
-  if (failedStepIndex >= 0) {
-    return { index: failedStepIndex, status: 'failed' };
-  }
-
-  if (run.status === 'failed') {
-    const errorStage = run.errorBrief?.stage;
-    const errorStepIndex = errorStage && isPipelineStepId(errorStage)
-      ? run.steps.findIndex((step) => step.id === errorStage)
-      : -1;
-    const firstIncompleteIndex = run.steps.findIndex((step) => step.status !== 'complete');
-    const fallbackIndex = firstIncompleteIndex >= 0 ? firstIncompleteIndex : Math.max(run.steps.length - 1, 0);
-
-    return {
-      index: errorStepIndex >= 0 ? errorStepIndex : fallbackIndex,
-      status: 'failed',
-    };
-  }
-
-  const runningStepIndex = run.steps.findIndex((step) => step.status === 'running');
-
-  if (runningStepIndex >= 0) {
-    return { index: runningStepIndex, status: 'running' };
-  }
-
-  if (run.status === 'complete' || run.status === 'trace-committed') {
-    return { index: Math.max(run.steps.length - 1, 0), status: 'complete' };
-  }
-
-  const lastCompleteIndex = getLastCompleteStepIndex(run.steps);
-
-  if (lastCompleteIndex >= 0) {
-    return { index: lastCompleteIndex, status: 'complete' };
-  }
-
-  return { index: 0, status: run.status === 'running' ? 'running' : 'pending' };
-}
-
-function getGatedPresentationTarget(run: PipelineRun, current: PresentedStepState): { index: number; status: PipelineStepStatus } {
-  const target = getPresentationTarget(run);
-
-  if ((run.status === 'complete' || run.status === 'trace-committed') && target.index > current.index) {
-    return target;
-  }
-
-  if (target.index <= current.index) {
-    return target;
-  }
-
-  for (let index = current.index; index < target.index; index += 1) {
-    const step = run.steps[index];
-
-    if (!step) break;
-
-    if (step.status === 'failed') {
-      return { index, status: 'failed' };
-    }
-
-    if (step.status !== 'complete' || !areStepOperationsReadyToAdvance(run, step.id)) {
-      return { index, status: step.status === 'pending' ? 'running' : step.status };
-    }
-  }
-
-  return target;
-}
-
-function areStepOperationsReadyToAdvance(run: PipelineRun, stepId: PipelineStep['id']): boolean {
-  const operations = run.stepOperations[stepId] ?? [];
-
-  if (operations.length === 0) {
-    return true;
-  }
-
-  return operations.every((operation) => operation.status === 'complete' || operation.status === 'info');
-}
-
-function isPipelineStepId(value: string): value is PipelineStep['id'] {
-  return ['extraction', 'ingestion', 'context', 'claim', 'resolver', 'comparison', 'market-creator', 'critic', 'circle', 'settlement', 'x402'].includes(value);
-}
-
-function getLastCompleteStepIndex(steps: PipelineStep[]): number {
-  for (let index = steps.length - 1; index >= 0; index -= 1) {
-    if (steps[index].status === 'complete') return index;
-  }
-
-  return -1;
 }
 
 function getStepState(status: PipelineStepStatus): StepState {
