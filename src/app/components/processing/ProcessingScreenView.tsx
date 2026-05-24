@@ -19,7 +19,7 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  getRunSourceExcerpt as getSourceExcerpt,
+  createSourceExcerpt,
   getSubmittedSourceSummary,
   isCommittedTrace,
   looksLikeUrl,
@@ -927,9 +927,9 @@ function getSourceInputView({
 
 function getSourceAcceptedView(pipelineRun: PipelineRun, fallbackSourceText: string, reduceMotion: boolean, handoffActive: boolean): ArtifactView {
   const submittedSource = pipelineRun.sourceInput || fallbackSourceText;
-  const sourceSummary = getSubmittedSourceSummary(submittedSource);
+  const sourceKind = getSubmittedSourceSummary(submittedSource).kind;
   const extracted = pipelineRun.extractedSource;
-  const showExtractedSeparately = Boolean(extracted && !isEffectivelySameSource(sourceSummary.text, extracted.text));
+  const showExtractedSeparately = Boolean(extracted && !isEffectivelySameSource(submittedSource, extracted.text));
 
   return {
     key: 'source-accepted',
@@ -946,17 +946,17 @@ function getSourceAcceptedView(pipelineRun: PipelineRun, fallbackSourceText: str
             <div className="eyebrow">Submitted source</div>
             <div className="flex flex-wrap gap-2">
               <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
-                {sourceSummary.kind}
+                {sourceKind}
               </span>
               {extracted && (
                 <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
-                  {extracted.domain}
+                  Detected: {extracted.domain}
                 </span>
               )}
             </div>
           </div>
           <div className="mt-3 max-h-72 overflow-y-auto rounded-md border border-[#E5E1D8] bg-white p-4 text-base leading-7 text-[#292824] [overflow-wrap:anywhere] whitespace-pre-wrap">
-            {sourceSummary.text}
+            {submittedSource}
           </div>
         </StepReveal>
         {extracted && showExtractedSeparately && (
@@ -1017,14 +1017,14 @@ function getArtifactView({
     case 'extraction': {
       const extracted = pipelineRun.extractedSource;
       const title = getExtractionTitle(pipelineRun, activeStep);
-      const sourceExcerpt = getSourceExcerpt(pipelineRun);
+      const sourceExcerpt = getSubmittedSourceExcerpt(pipelineRun);
 
       return {
         key: activeStep.id,
         step: activeStep,
         eyebrow: 'Read Source',
         title,
-        description: extracted ? extracted.domain : formatStepStatus(activeStep.status),
+        description: extracted ? `Detected source: ${extracted.domain}` : formatStepStatus(activeStep.status),
         icon: <FileText aria-hidden="true" size={18} />,
         body: (
           <>
@@ -1038,7 +1038,7 @@ function getArtifactView({
             </div>
             {sourceExcerpt && (
               <StepReveal index={2} className="mt-5 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
-                <div className="eyebrow">Source excerpt</div>
+                <div className="eyebrow">Submitted source excerpt</div>
                 <p className="mt-3 text-base leading-7 text-[#292824]">{sourceExcerpt}</p>
               </StepReveal>
             )}
@@ -1054,12 +1054,14 @@ function getArtifactView({
         return createPendingArtifactView(activeStep, 'Source metadata is being assembled.');
       }
 
-      const source = pipelineRun.extractedSource ? `${pipelineRun.extractedSource.title} / ${pipelineRun.extractedSource.domain}` : ingestion.source;
+      const submittedSource = getSubmittedSourceForRun(pipelineRun);
+      const detectedSource = pipelineRun.extractedSource?.domain ?? ingestion.source;
       const fields = [
         ['Language', `${ingestion.language} (${formatLanguageConfidence(ingestion.languageConfidence)})`],
-        ['Source', source],
+        ['Detected source', detectedSource],
         ['Actors', getActors(ingestion.entities)],
         ['Region', ingestion.region],
+        ['Detected signal', ingestion.signalName],
         ['Event type', ingestion.topic],
         ['Source date', ingestion.sourceDate],
         ['Normalized claim', getNormalizedClaim(ingestion)],
@@ -1069,16 +1071,19 @@ function getArtifactView({
         key: activeStep.id,
         step: activeStep,
         eyebrow: 'Source Details',
-        title: ingestion.signalName,
+        title: 'Submitted source metadata.',
         icon: <Globe2 aria-hidden="true" size={18} />,
         body: (
-          <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2 lg:grid-cols-3">
-            {fields.map(([label, value], index) => (
-              <StepReveal key={label} index={index}>
-                <ArtifactField label={label} value={value || 'Not available'} />
-              </StepReveal>
-            ))}
-          </div>
+          <>
+            <SubmittedSourceBlock sourceText={submittedSource} />
+            <div className="mt-5 grid gap-4 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2 lg:grid-cols-3">
+              {fields.map(([label, value], index) => (
+                <StepReveal key={label} index={index + 1}>
+                  <ArtifactField label={label} value={value || 'Not available'} />
+                </StepReveal>
+              ))}
+            </div>
+          </>
         ),
       };
     }
@@ -1739,6 +1744,24 @@ function StepReveal({
   );
 }
 
+function SubmittedSourceBlock({ sourceText }: { sourceText: string }) {
+  const sourceKind = getSubmittedSourceSummary(sourceText).kind;
+
+  return (
+    <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="eyebrow">Submitted source</div>
+        <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
+          {sourceKind}
+        </span>
+      </div>
+      <div className="mt-3 max-h-72 overflow-y-auto rounded-md border border-[#E5E1D8] bg-white p-4 text-base leading-7 text-[#292824] [overflow-wrap:anywhere] whitespace-pre-wrap">
+        {sourceText}
+      </div>
+    </StepReveal>
+  );
+}
+
 function StepPendingArtifact({ title, description, progressRail }: { title: string; description: string; progressRail?: ReactNode }) {
   return (
     <StepArtifactFrame eyebrow="Queued" title={title} description={description} icon={<LoaderCircle aria-hidden="true" size={18} />} progressRail={progressRail}>
@@ -1752,10 +1775,10 @@ function StepPendingArtifact({ title, description, progressRail }: { title: stri
 function ExtractionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: PipelineRun; step: PipelineStep; progressRail?: ReactNode }) {
   const extracted = pipelineRun.extractedSource;
   const title = getExtractionTitle(pipelineRun, step);
-  const sourceExcerpt = getSourceExcerpt(pipelineRun);
+  const sourceExcerpt = getSubmittedSourceExcerpt(pipelineRun);
 
   return (
-    <StepArtifactFrame eyebrow="Read Source" title={title} description={extracted ? extracted.domain : formatStepStatus(step.status)} step={step} icon={<FileText aria-hidden="true" size={18} />} progressRail={progressRail}>
+    <StepArtifactFrame eyebrow="Read Source" title={title} description={extracted ? `Detected source: ${extracted.domain}` : formatStepStatus(step.status)} step={step} icon={<FileText aria-hidden="true" size={18} />} progressRail={progressRail}>
       <div className="mt-8 grid gap-3 sm:grid-cols-2">
         <StepReveal>
           <ArtifactField label="Input type" value={looksLikeUrl(pipelineRun.sourceInput) ? 'Readable URL' : 'Pasted source text'} />
@@ -1766,7 +1789,7 @@ function ExtractionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: 
       </div>
       {sourceExcerpt && (
         <StepReveal index={2} className="mt-5 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
-          <div className="eyebrow">Source excerpt</div>
+          <div className="eyebrow">Submitted source excerpt</div>
           <p className="mt-3 text-base leading-7 text-[#292824]">{sourceExcerpt}</p>
         </StepReveal>
       )}
@@ -1781,22 +1804,25 @@ function IngestionArtifact({ pipelineRun, step, progressRail }: { pipelineRun: P
     return <StepPendingArtifact title="Source details are being prepared." description={step.reasoningSnippet} progressRail={progressRail} />;
   }
 
-  const source = pipelineRun.extractedSource ? `${pipelineRun.extractedSource.title} / ${pipelineRun.extractedSource.domain}` : ingestion.source;
+  const submittedSource = getSubmittedSourceForRun(pipelineRun);
+  const detectedSource = pipelineRun.extractedSource?.domain ?? ingestion.source;
   const fields = [
     ['Language', `${ingestion.language} (${formatLanguageConfidence(ingestion.languageConfidence)})`],
-    ['Source', source],
+    ['Detected source', detectedSource],
     ['Actors', getActors(ingestion.entities)],
     ['Region', ingestion.region],
+    ['Detected signal', ingestion.signalName],
     ['Event type', ingestion.topic],
     ['Source date', ingestion.sourceDate],
     ['Normalized claim', getNormalizedClaim(ingestion)],
   ];
 
   return (
-    <StepArtifactFrame eyebrow="Source Details" title={ingestion.signalName} step={step} icon={<Globe2 aria-hidden="true" size={18} />} progressRail={progressRail}>
-      <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2 lg:grid-cols-3">
+    <StepArtifactFrame eyebrow="Source Details" title="Submitted source metadata." step={step} icon={<Globe2 aria-hidden="true" size={18} />} progressRail={progressRail}>
+      <SubmittedSourceBlock sourceText={submittedSource} />
+      <div className="mt-5 grid gap-4 border-t border-[#E5E1D8] pt-6 sm:grid-cols-2 lg:grid-cols-3">
         {fields.map(([label, value], index) => (
-          <StepReveal key={label} index={index}>
+          <StepReveal key={label} index={index + 1}>
             <ArtifactField label={label} value={value || 'Not available'} />
           </StepReveal>
         ))}
@@ -2133,7 +2159,7 @@ function ArtifactField({ label, value }: { label: string; value: string }) {
 }
 
 function getExtractionTitle(run: PipelineRun, step: PipelineStep): string {
-  if (run.extractedSource) return run.extractedSource.title;
+  if (run.extractedSource) return looksLikeUrl(run.sourceInput) ? 'Article source prepared.' : 'Source text prepared.';
   if (looksLikeUrl(run.sourceInput)) return step.status === 'complete' ? 'Article source prepared.' : 'Extracting article...';
   return step.status === 'complete' ? 'Source text prepared.' : 'Preparing pasted source.';
 }
@@ -2142,6 +2168,14 @@ function getExtractionStatus(run: PipelineRun, step: PipelineStep): string {
   if (run.extractedSource) return 'Article text extracted';
   if (looksLikeUrl(run.sourceInput)) return step.status === 'running' ? 'Reading source' : 'URL prepared';
   return step.status === 'running' ? 'Preparing pasted text' : 'Source text prepared';
+}
+
+function getSubmittedSourceForRun(run: PipelineRun): string {
+  return run.sourceInput || run.submission.sourceText;
+}
+
+function getSubmittedSourceExcerpt(run: PipelineRun): string {
+  return createSourceExcerpt(getSubmittedSourceForRun(run), 227);
 }
 
 function formatLanguageConfidence(value: number): string {

@@ -309,6 +309,7 @@ export function createDemoArtifactRun(): PipelineRun {
 function createQueuedPipelineSteps(): PipelineStep[] {
   return [
     createCanonicalPipelineStep('extraction'),
+    createPipelineStep('ingestion', 'Source Details', 'Source Details Agent', 'Label the source language, region, actors, and event type.', 'Waiting for readable source.', 'No source metadata prepared yet.'),
     createCanonicalPipelineStep('claim'),
     createCanonicalPipelineStep('resolver', { action: 'Check the official page that will decide YES or NO.', outputSummary: 'No official source checked yet.' }),
     createCanonicalPipelineStep('comparison'),
@@ -322,7 +323,8 @@ function createQueuedPipelineSteps(): PipelineStep[] {
 
 function revealStepArtifacts(run: PipelineRun, resolvedRun: PipelineRun, stepId: PipelineStep['id']): PipelineRun {
   if (stepId === 'extraction') return updateRun(run, { extractedSource: resolvedRun.extractedSource });
-  if (stepId === 'claim') return updateRun(run, { ingestion: resolvedRun.ingestion, context: resolvedRun.context });
+  if (stepId === 'ingestion') return updateRun(run, { ingestion: resolvedRun.ingestion });
+  if (stepId === 'claim') return updateRun(run, { context: resolvedRun.context });
   if (stepId === 'resolver') return updateRun(run, { liveResolver: resolvedRun.liveResolver });
   if (stepId === 'comparison') return updateRun(run, { liveMarketComparison: resolvedRun.liveMarketComparison });
   if (stepId === 'market-creator') return updateRun(run, { candidateMarkets: resolvedRun.candidateMarkets, rejectedMarkets: resolvedRun.rejectedMarkets });
@@ -870,6 +872,7 @@ function createPipelineSteps(
 
   return [
     createPipelineStep('extraction', 'Read Source', 'Source Reader', 'Turn the submitted URL or pasted text into readable source material.', 'Source text is prepared for review.', 'Source text is ready with a short excerpt for review.'),
+    createPipelineStep('ingestion', 'Source Details', 'Source Details Agent', 'Label the source language, region, actors, and event type.', `${ingestion.source} detected as a ${ingestion.language} source from ${ingestion.region}.`, `${ingestion.signalName}; source date ${ingestion.sourceDate}.`),
     createPipelineStep('claim', 'Find Main Claim', 'Claim Finder', 'Identify the event claim, people or organizations involved, evidence, and deadline.', `${ingestion.language} source with ${ingestion.entities.length} actors and a ${defaultDeadline(ingestion)} deadline.`, `${ingestion.topic} in ${ingestion.region}; deadline ${defaultDeadline(ingestion)}.`),
     createPipelineStep('resolver', 'Check Official Source', 'Official Source Checker', 'Find and verify the official page that will decide YES or NO.', createDemoResolver(ingestion).verificationEvidence, `${createDemoResolver(ingestion).name} checked as the official source.`),
     createPipelineStep('comparison', 'Check Existing Questions', 'Question Overlap Checker', 'Compare against existing betting questions with the same outcome.', createDemoMarketComparison(ingestion).reasoning, 'Question overlap check result: no overlapping question found.'),
