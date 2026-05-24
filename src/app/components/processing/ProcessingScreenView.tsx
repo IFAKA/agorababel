@@ -1083,9 +1083,7 @@ function createArtifactView({
                     <ArtifactField key={label} label={label} value={value || 'Not available'} />
                   ))}
                 </div>
-                <div className="mt-4">
-                  <SubmittedSourceBlock sourceText={submittedSource} />
-                </div>
+                <SubmittedSourceBlock sourceText={submittedSource} className="mt-4 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4" />
               </details>
             </StepReveal>
           </div>
@@ -1114,9 +1112,11 @@ function createArtifactView({
               <div className="mt-8 grid gap-4 border-t border-[#E5E1D8] pt-6">
                 {discovery && <ResolverDiscoveryPanel discovery={discovery} />}
                 {discovery?.status !== 'found' && (
-                  <div className="rounded-md border border-[#E0C5BC] bg-[#FFF9F5] p-4">
-                    <ArtifactField label="Result" value={pipelineRun.analysis?.rejectionReason ?? discovery?.reason ?? 'No official resolver found.'} />
-                  </div>
+                  <ArtifactField
+                    label="Result"
+                    value={pipelineRun.analysis?.rejectionReason ?? discovery?.reason ?? 'No official resolver found.'}
+                    className="rounded-md border border-[#E0C5BC] bg-[#FFF9F5] p-4"
+                  />
                 )}
               </div>
             ),
@@ -1231,9 +1231,7 @@ function createArtifactView({
               <div className="grid gap-4 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 sm:grid-cols-2">
                 <ArtifactField label="Deadline" value={market.deadline} />
                 <ArtifactField label="Resolution source" value={market.resolutionSource} />
-                <div className="sm:col-span-2">
-                  <ArtifactField label="Why this framing" value={market.evidenceSummary} />
-                </div>
+                <ArtifactField className="sm:col-span-2" label="Why this framing" value={market.evidenceSummary} />
               </div>
             </StepReveal>
           </div>
@@ -1701,11 +1699,11 @@ function StepReveal({
   );
 }
 
-function SubmittedSourceBlock({ sourceText }: { sourceText: string }) {
+function SubmittedSourceBlock({ sourceText, className = 'mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4' }: { sourceText: string; className?: string }) {
   const sourceKind = getSubmittedSourceSummary(sourceText).kind;
 
   return (
-    <StepReveal className="mt-8 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4">
+    <StepReveal className={className}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="eyebrow">Submitted source</div>
         <span className="rounded-sm border border-[#D8D3C8] bg-white px-2 py-1 text-xs font-medium text-[#625F57]">
@@ -1886,9 +1884,7 @@ function DraftArtifact({ market, step, progressRail }: { market?: MarketQuestion
           <div className="grid gap-4 rounded-md border border-[#E5E1D8] bg-[#FBFAF7] p-4 sm:grid-cols-2">
             <ArtifactField label="Deadline" value={market.deadline} />
             <ArtifactField label="Resolution source" value={market.resolutionSource} />
-            <div className="sm:col-span-2">
-              <ArtifactField label="Why this framing" value={market.evidenceSummary} />
-            </div>
+            <ArtifactField className="sm:col-span-2" label="Why this framing" value={market.evidenceSummary} />
           </div>
         </StepReveal>
       </div>
@@ -2118,9 +2114,9 @@ function resolverCandidateStatusClassName(status: NonNullable<NonNullable<Pipeli
   return 'border-[#E5E1D8] bg-white text-[#77746B]';
 }
 
-function ArtifactField({ label, value }: { label: string; value: string }) {
+function ArtifactField({ label, value, className = '' }: { label: string; value: string; className?: string }) {
   return (
-    <div className="min-w-0">
+    <div className={`min-w-0 ${className}`}>
       <div className="eyebrow">{label}</div>
       <div className="mt-2 min-w-0 text-base font-medium leading-7 text-[#292824] [overflow-wrap:anywhere]">{value}</div>
     </div>
