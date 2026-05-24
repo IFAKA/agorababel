@@ -163,7 +163,7 @@ export function ProcessingScreen({
   const isComplete = pipelineRun.status === 'complete';
   const isRunning = pipelineRun.status === 'running';
   const sourceReadiness = getSourceReadiness(sourceText, isRunning);
-  const progressPipelineSteps = hasStarted ? presentedSteps : [];
+  const progressPipelineSteps = presentedSteps;
   const progressSteps = useMemo<ProgressStep[]>(() => [
     {
       id: 'source',
