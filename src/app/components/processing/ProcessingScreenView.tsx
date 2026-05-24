@@ -152,7 +152,7 @@ export function ProcessingScreen({
   const runningStep = presentedSteps.find((step) => step.status === 'running' || step.status === 'failed');
   const activeStep = runningStep ?? [...presentedSteps].reverse().find((step) => step.status === 'complete') ?? presentedSteps[0];
   const selectedPipelineStepId = selectedStepId && selectedStepId !== 'source' ? selectedStepId : null;
-  const selectedStep = selectedPipelineStepId ? presentedSteps.find((step) => step.id === selectedPipelineStepId && step.status !== 'pending') : undefined;
+  const selectedStep = selectedPipelineStepId ? pipelineRun.steps.find((step) => step.id === selectedPipelineStepId && step.status !== 'pending') : undefined;
   const displayedStep = selectedStep ?? activeStep;
   const displayedStepIndex = displayedStep ? presentedSteps.findIndex((step) => step.id === displayedStep.id) : -1;
   const previousDisplayedStepIndexRef = useRef(displayedStepIndex);
@@ -191,8 +191,17 @@ export function ProcessingScreen({
       return;
     }
 
-    const step = progressPipelineSteps.find((item) => item.id === stepId);
-    if (step?.status !== 'pending') setSelectedStepId(stepId);
+    const liveStepIndex = pipelineRun.steps.findIndex((item) => item.id === stepId);
+    const liveStep = liveStepIndex >= 0 ? pipelineRun.steps[liveStepIndex] : undefined;
+    if (!liveStep || liveStep.status === 'pending') return;
+
+    if (liveStep.status === 'running' || liveStep.status === 'failed') {
+      setPresentedStep({ index: liveStepIndex, status: liveStep.status, since: Date.now() });
+      setSelectedStepId(null);
+      return;
+    }
+
+    setSelectedStepId(stepId);
   };
 
   useEffect(() => {
@@ -472,7 +481,9 @@ function VerticalProgressRail({
                   aria-current={selected ? 'step' : undefined}
                   aria-label={`${step.label}: ${formatStepStatus(step.status)}. ${step.description}`}
                   className={`workflow-step-trigger mt-1 grid size-7 place-items-center rounded-full border transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
-                    selected
+                    state === 'active'
+                      ? `workflow-step-trigger--active ${selected ? 'shadow-[0_0_0_4px_rgba(23,23,23,0.08)]' : ''}`
+                      : selected
                       ? 'workflow-step-trigger--selected shadow-[0_0_0_4px_rgba(23,23,23,0.08)]'
                       : state === 'complete'
                         ? 'workflow-step-trigger--complete'
@@ -663,7 +674,9 @@ function ProgressRail({
                     className={`${
                       selected ? 'inline-flex h-10 w-[9.5rem] justify-start gap-2 px-3 sm:w-40' : 'inline-grid size-9 place-items-center'
                     } workflow-step-trigger items-center rounded-full border text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
-                      selected
+                      state === 'active'
+                        ? `workflow-step-trigger--active ${selected ? 'shadow-[0_0_0_4px_rgba(23,23,23,0.08),0_10px_24px_rgba(29,28,24,0.12)]' : ''}`
+                        : selected
                         ? 'workflow-step-trigger--selected shadow-[0_0_0_4px_rgba(23,23,23,0.08),0_10px_24px_rgba(29,28,24,0.12)]'
                         : state === 'complete'
                           ? 'workflow-step-trigger--complete'
@@ -742,15 +755,15 @@ function StepConnector({
 
 function StepMark({ state, compact = false, selected = false }: { state: StepState; compact?: boolean; selected?: boolean }) {
   const reduceMotion = useReducedMotion();
-  const className = selected
-    ? 'workflow-step-mark--selected'
-    : state === 'complete'
+  const className = state === 'active'
+    ? 'workflow-step-mark--active'
+    : selected
+      ? 'workflow-step-mark--selected'
+      : state === 'complete'
       ? 'workflow-step-mark--complete'
-      : state === 'active'
-        ? 'workflow-step-mark--active'
-        : state === 'failed'
-          ? 'workflow-step-mark--failed'
-          : 'workflow-step-mark--pending';
+      : state === 'failed'
+        ? 'workflow-step-mark--failed'
+        : 'workflow-step-mark--pending';
   const sizeClassName = compact ? 'size-4' : 'size-5';
   const iconSize = compact ? 10 : 12;
 

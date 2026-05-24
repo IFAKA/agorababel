@@ -625,6 +625,12 @@
     border-color: var(--workflow-step-active-border);
   }
 
+  .workflow-step-trigger--active {
+    background: var(--workflow-step-active-bg);
+    border-color: var(--workflow-step-active-border);
+    color: var(--workflow-step-active-text);
+  }
+
   .workflow-step-trigger--selected {
     background: var(--workflow-step-selected-bg);
     border-color: var(--workflow-step-selected-border);

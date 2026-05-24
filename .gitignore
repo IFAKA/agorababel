@@ -5,6 +5,7 @@ dist/
 .env
 .env.*
 !.env.example
+canteen-cli.md
 
 test-results/
 playwright-report/
