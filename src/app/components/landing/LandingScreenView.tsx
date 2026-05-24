@@ -98,12 +98,11 @@ export function LandingScreen({
   const reduceMotion = useReducedMotion();
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-[#F7F6F1] text-[#191A1C]">
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <motion.div
-          {...landingSequenceMotion(reduceMotion, introActive)}
-          className={`${pageContainerClassName} min-h-full content-center`}
-        >
+    <main className="h-full w-full overflow-y-auto bg-[#F7F6F1] text-[#191A1C]">
+      <motion.div
+        {...landingSequenceMotion(reduceMotion, introActive)}
+        className={`${pageContainerClassName} min-h-full content-center`}
+      >
           <motion.header
             variants={reduceMotion || introActive ? undefined : landingItemMotion}
             className="flex items-center justify-between gap-4"
@@ -173,9 +172,8 @@ export function LandingScreen({
           </motion.section>
 
           <WorkflowStrip reduceMotion={reduceMotion} />
-        </motion.div>
-      </main>
-    </div>
+      </motion.div>
+    </main>
   );
 }
 

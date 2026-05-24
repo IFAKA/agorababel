@@ -136,9 +136,8 @@ export function MarketScreen({
   };
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-[#F7F6F1] text-[#191A1C]">
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className={pageContainerClassName}>
+    <main className="h-full w-full overflow-y-auto bg-[#F7F6F1] text-[#191A1C]">
+      <div className={pageContainerClassName}>
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E3DED3] pb-4">
             <div className="flex min-w-0 items-start gap-3">
               <button type="button" onClick={onBackToWorkflow} className="secondary-button pressable h-10 min-h-10 px-3" aria-label="Back to workflow steps">
@@ -332,9 +331,8 @@ export function MarketScreen({
               </div>
             </article>
           )}
-        </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
 

@@ -28,7 +28,6 @@ import {
 import { pipelineStepDescriptions as stepDescriptions, pipelineStepLabels as stepLabels } from '../../pipeline/stages';
 import {
   areStepOperationsReadyToAdvance,
-  clamp,
   getGatedPresentationTarget,
   getOneStepPresentationTarget,
   getStepDwellMs,
@@ -277,41 +276,37 @@ export function ProcessingScreen({
   };
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-[#F7F6F1] text-[#191A1C]">
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className={`${pageContainerClassName} max-w-[92rem]`}>
-          <section className="mx-auto grid w-full min-w-0 gap-5 lg:grid-cols-[21rem_minmax(0,1fr)] xl:grid-cols-[22.5rem_minmax(0,1fr)]">
-            <WorkflowSidebar
-              steps={progressSteps}
-              selectedStepId={selectedProgressStepId}
-              runStatus={pipelineRun.status}
-              historyItems={submissionHistory}
-              onSelectStep={handleSelectProgressStep}
-              onSelectHistoryItem={onSelectSubmission}
-              onNewAnalysis={onNewAnalysis}
-            />
-            <PipelineArtifact
-              sourceText={sourceText}
-              onSourceTextChange={onSourceTextChange}
-              onRunPipeline={onRunPipeline}
-              sourceReadiness={sourceReadiness}
-              pipelineRun={pipelineRun}
-              activeStep={displayedStep}
-              copied={copied}
-              errorCopied={errorCopied}
-              onCopy={handleCopy}
-              onCopyError={handleCopyError}
-              onOpenFinalArtifact={onOpenFinalArtifact}
-              isComplete={isComplete}
-              transitionDirection={!hasStarted || (hasStarted && displayedStepIndex === 0 && presentedStep.status === 'running') ? 1 : stepTransitionDirection}
-              showSourceInput={!hasStarted}
-              showSourceAccepted={hasStarted && selectedStepId === 'source'}
-              sourceHandoffActive={false}
-            />
-          </section>
-        </div>
-      </main>
-    </div>
+    <main className="h-full w-full overflow-y-auto bg-[#F7F6F1] text-[#191A1C]">
+      <section className={`${pageContainerClassName} max-w-[92rem] lg:grid-cols-[21rem_minmax(0,1fr)] xl:grid-cols-[22.5rem_minmax(0,1fr)]`}>
+        <WorkflowSidebar
+          steps={progressSteps}
+          selectedStepId={selectedProgressStepId}
+          runStatus={pipelineRun.status}
+          historyItems={submissionHistory}
+          onSelectStep={handleSelectProgressStep}
+          onSelectHistoryItem={onSelectSubmission}
+          onNewAnalysis={onNewAnalysis}
+        />
+        <PipelineArtifact
+          sourceText={sourceText}
+          onSourceTextChange={onSourceTextChange}
+          onRunPipeline={onRunPipeline}
+          sourceReadiness={sourceReadiness}
+          pipelineRun={pipelineRun}
+          activeStep={displayedStep}
+          copied={copied}
+          errorCopied={errorCopied}
+          onCopy={handleCopy}
+          onCopyError={handleCopyError}
+          onOpenFinalArtifact={onOpenFinalArtifact}
+          isComplete={isComplete}
+          transitionDirection={!hasStarted || (hasStarted && displayedStepIndex === 0 && presentedStep.status === 'running') ? 1 : stepTransitionDirection}
+          showSourceInput={!hasStarted}
+          showSourceAccepted={hasStarted && selectedStepId === 'source'}
+          sourceHandoffActive={false}
+        />
+      </section>
+    </main>
   );
 }
 
@@ -601,149 +596,6 @@ function HistoryStatusDot({ status }: { status: HistoryItem['status'] }) {
         : 'bg-[#C8C1B3]';
 
   return <span aria-hidden="true" className={`mt-1.5 size-2 shrink-0 rounded-full ${className}`} />;
-}
-
-function ProgressRail({
-  steps,
-  selectedStepId,
-  onSelectStep,
-}: {
-  steps: ProgressStep[];
-  selectedStepId?: ProgressStepId;
-  onSelectStep: (stepId: ProgressStepId) => void;
-}) {
-  const reduceMotion = useReducedMotion();
-  const [tooltip, setTooltip] = useState<{
-    stepId: ProgressStepId;
-    left: number;
-    top: number;
-  } | null>(null);
-
-  const showTooltip = (stepId: ProgressStepId, target: HTMLElement) => {
-    const rect = target.getBoundingClientRect();
-    const tooltipWidth = 256;
-    const viewportPadding = 16;
-    const left = clamp(
-      rect.left + rect.width / 2,
-      viewportPadding + tooltipWidth / 2,
-      window.innerWidth - viewportPadding - tooltipWidth / 2,
-    );
-
-    setTooltip({
-      stepId,
-      left,
-      top: rect.bottom + 10,
-    });
-  };
-  const tooltipStep = tooltip ? steps.find((step) => step.id === tooltip.stepId) : undefined;
-
-  return (
-    <nav aria-label="Workflow progress" className="relative overflow-visible">
-      <div className="-mx-6 overflow-x-auto px-6 py-1 sm:-mx-8 sm:px-8 lg:-mx-10 lg:px-10">
-        <ol className="flex min-w-max items-center gap-0 sm:min-w-0">
-          {steps.map((step, index) => {
-            const state = getStepState(step.status);
-            const nextStep = steps[index + 1];
-            const nextState = nextStep ? getStepState(nextStep.status) : undefined;
-            const selected = selectedStepId === step.id;
-            const hasConnector = index < steps.length - 1;
-            const disabled = !step.selectable;
-
-            return (
-              <li key={step.id} className="flex min-w-0 items-center">
-                <span className="inline-flex shrink-0 items-center justify-center py-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!disabled) onSelectStep(step.id);
-                    }}
-                    onPointerEnter={(event) => showTooltip(step.id, event.currentTarget)}
-                    onPointerLeave={() => setTooltip(null)}
-                    onFocus={(event) => showTooltip(step.id, event.currentTarget)}
-                    onBlur={() => setTooltip(null)}
-                    disabled={disabled}
-                    aria-current={selected ? 'step' : undefined}
-                    aria-label={`${step.label}: ${formatStepStatus(step.status)}. ${step.description}`}
-                    className={`${
-                      selected ? 'inline-flex h-10 w-[9.5rem] justify-start gap-2 px-3 sm:w-40' : 'inline-grid size-9 place-items-center'
-                    } workflow-step-trigger items-center rounded-full border text-sm font-medium transition-[background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed ${
-                      state === 'active'
-                        ? `workflow-step-trigger--active ${selected ? 'shadow-[0_0_0_4px_rgba(23,23,23,0.08),0_10px_24px_rgba(29,28,24,0.12)]' : ''}`
-                        : selected
-                        ? 'workflow-step-trigger--selected shadow-[0_0_0_4px_rgba(23,23,23,0.08),0_10px_24px_rgba(29,28,24,0.12)]'
-                        : state === 'complete'
-                          ? 'workflow-step-trigger--complete'
-                          : state === 'failed'
-                            ? 'workflow-step-trigger--failed'
-                            : 'workflow-step-trigger--pending'
-                    }`}
-                  >
-                    <StepMark state={state} compact selected={selected} />
-                    {selected && <span className="min-w-0 truncate text-left leading-5">{step.label}</span>}
-                  </button>
-                </span>
-                {hasConnector && <StepConnector state={state} nextState={nextState} reduceMotion={Boolean(reduceMotion)} />}
-              </li>
-            );
-          })}
-        </ol>
-      </div>
-      {tooltip && tooltipStep && (
-        <span
-          role="tooltip"
-          className="pointer-events-none fixed z-[9999] w-64 -translate-x-1/2 rounded-md border border-[#D8D3C8] bg-white px-3 py-2 text-left text-xs leading-5 text-[#625F57] opacity-100 shadow-[0_18px_44px_rgba(29,28,24,0.14)]"
-          style={{ left: tooltip.left, top: tooltip.top }}
-        >
-          <span className="block font-semibold text-[#171717]">{tooltipStep.label}</span>
-          {formatStepStatus(tooltipStep.status)}
-        </span>
-      )}
-    </nav>
-  );
-}
-
-function StepConnector({
-  state,
-  nextState,
-  reduceMotion,
-}: {
-  state: StepState;
-  nextState?: StepState;
-  reduceMotion: boolean;
-}) {
-  const isPassed = state === 'complete' && nextState !== 'pending';
-  const isPreparingNext = state === 'complete' && nextState === 'pending';
-  const isFailed = state === 'failed';
-  const guideClassName = isFailed ? 'workflow-connector-guide--failed' : 'workflow-connector-guide--idle';
-
-  return (
-    <span aria-hidden="true" className="pointer-events-none relative mx-1 h-px w-9 shrink-0 overflow-hidden sm:w-[clamp(2rem,5vw,5rem)]">
-      <span className={`workflow-connector-guide workflow-connector-guide--horizontal absolute inset-0 ${guideClassName}`} />
-      {isPassed && !reduceMotion ? (
-        <motion.span
-          key="solid-connector"
-          className="workflow-connector-fill absolute inset-y-0 left-0 w-full origin-left"
-          initial={{ scaleX: 0 }}
-          animate={{ scaleX: 1 }}
-          transition={{ duration: 0.62, ease: [0.23, 1, 0.32, 1] }}
-          style={{ transformOrigin: 'left' }}
-        />
-      ) : isPassed ? (
-        <span className="workflow-connector-fill absolute inset-0" />
-      ) : isPreparingNext && !reduceMotion ? (
-        <motion.span
-          key="handoff-connector"
-          className="workflow-connector-handoff workflow-connector-handoff--horizontal absolute inset-y-0 left-0 w-full origin-left"
-          initial={{ scaleX: 0, opacity: 0 }}
-          animate={{ scaleX: [0, 0.42, 0.72], opacity: [0, 1, 0.38] }}
-          transition={{ duration: 0.86, ease: [0.23, 1, 0.32, 1] }}
-          style={{ transformOrigin: 'left' }}
-        />
-      ) : (
-        null
-      )}
-    </span>
-  );
 }
 
 function StepMark({ state, compact = false, selected = false }: { state: StepState; compact?: boolean; selected?: boolean }) {
