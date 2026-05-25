@@ -446,15 +446,15 @@ function createDemoX402(acceptedMarket: AcceptedMarket): NonNullable<PipelineRun
   const artifactId = acceptedMarket.id;
 
   return {
-    status: 'required',
+    status: 'disabled',
     artifactId,
-    priceUsdcMicro: 10000,
-    payToAddress: DEMO_WALLET_ADDRESS,
-    facilitatorUrl: 'https://gateway-api-testnet.circle.com',
-    gatewayUrl: 'https://gateway-api-testnet.circle.com',
+    priceUsdcMicro: null,
+    payToAddress: null,
+    facilitatorUrl: null,
+    gatewayUrl: null,
     network: 'Preview access metadata; no payment service call',
-    intelligenceUrl: `/demo/artifacts/${artifactId}/intelligence`,
-    demoUnlockUrl: `/demo/artifacts/${artifactId}/unlock`,
+    intelligenceUrl: `/api/markets/${encodeURIComponent(artifactId)}/intelligence`,
+    demoUnlockUrl: null,
   };
 }
 
