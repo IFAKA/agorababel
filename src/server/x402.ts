@@ -9,6 +9,7 @@ const artifactStore = new Map<string, AnalysisResult>();
 const arcTestnetNetwork = 'eip155:5042002';
 const arcTestnetGatewayChain = 'arcTestnet';
 const gatewayDescription = 'AgoraBabel paid market intelligence artifact';
+const demoUnlockResourceHeader = 'x-agorababel-x402-resource';
 
 type PaidIntelligencePayload = AnalysisResult & {
   x402Receipt?: X402Receipt;
@@ -105,11 +106,6 @@ async function handleDemoUnlockRequest(request: IncomingMessage, response: Serve
     return;
   }
 
-  if (!config.x402BuyerPrivateKey) {
-    sendError(response, 503, 'x402 buyer agent is not configured.', 'x402-demo-unlock', 'Set X402_BUYER_PRIVATE_KEY or ARC_COMMITTER_PRIVATE_KEY for the demo buyer agent.');
-    return;
-  }
-
   const artifactId = getArtifactId(request.url, 'demo-unlock');
   const artifact = artifactStore.get(artifactId) ?? await readArtifactFromUnlockBody(request, artifactId);
 
@@ -120,6 +116,21 @@ async function handleDemoUnlockRequest(request: IncomingMessage, response: Serve
 
   artifactStore.set(artifactId, artifact);
 
+  if (request.headers[demoUnlockResourceHeader] === '1') {
+    await requireGatewayPayment(request, response, artifactId, () => {
+      sendJson(response, 200, {
+        ...artifact,
+        x402Receipt: createReceipt((request as PaymentRequest).payment),
+      } satisfies PaidIntelligencePayload);
+    });
+    return;
+  }
+
+  if (!config.x402BuyerPrivateKey) {
+    sendError(response, 503, 'x402 buyer agent is not configured.', 'x402-demo-unlock', 'Set X402_BUYER_PRIVATE_KEY or ARC_COMMITTER_PRIVATE_KEY for the demo buyer agent.');
+    return;
+  }
+
   try {
     const buyer = new GatewayClient({
       chain: arcTestnetGatewayChain,
@@ -128,7 +139,14 @@ async function handleDemoUnlockRequest(request: IncomingMessage, response: Serve
     });
     const price = BigInt(config.x402PriceUsdcMicro);
     const deposit = await depositIfNeeded(buyer, price);
-    const paid = await buyer.pay<PaidIntelligencePayload>(createAbsoluteUrl(request, `/api/markets/${encodeURIComponent(artifactId)}/intelligence`));
+    const paid = await buyer.pay<PaidIntelligencePayload>(
+      createAbsoluteUrl(request, `/api/markets/${encodeURIComponent(artifactId)}/demo-unlock`),
+      {
+        method: 'POST',
+        headers: { [demoUnlockResourceHeader]: '1' },
+        body: { artifact },
+      },
+    );
     const receipt = paid.data.x402Receipt ?? {
       payer: buyer.address,
       seller: config.x402PayToAddress,
