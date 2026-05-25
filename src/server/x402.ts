@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { GatewayClient } from '@circle-fin/x402-batching/client';
 import { createGatewayMiddleware, type PaymentRequest } from '@circle-fin/x402-batching/server';
-import type { AnalysisResult, X402PublicationStatus } from '../app/pipeline/analysisSchema.ts';
+import { AnalysisResultSchema, type AnalysisResult, type X402PublicationStatus } from '../app/pipeline/analysisSchema.ts';
 import { getRuntimeConfig } from './config.ts';
-import { methodNotAllowed, sendError, sendJson } from './http.ts';
+import { methodNotAllowed, readJson, sendError, sendJson } from './http.ts';
 
 const artifactStore = new Map<string, AnalysisResult>();
 const arcTestnetNetwork = 'eip155:5042002';
@@ -111,12 +111,14 @@ async function handleDemoUnlockRequest(request: IncomingMessage, response: Serve
   }
 
   const artifactId = getArtifactId(request.url, 'demo-unlock');
-  const artifact = artifactStore.get(artifactId);
+  const artifact = artifactStore.get(artifactId) ?? await readArtifactFromUnlockBody(request, artifactId);
 
   if (!artifact) {
     sendError(response, 404, 'Artifact not found.', 'x402-demo-unlock', 'The requested artifact is not present in the server artifact store.');
     return;
   }
+
+  artifactStore.set(artifactId, artifact);
 
   try {
     const buyer = new GatewayClient({
@@ -156,6 +158,20 @@ async function handleDemoUnlockRequest(request: IncomingMessage, response: Serve
       error instanceof Error ? error.message : 'Circle Gateway buyer payment failed.',
     );
   }
+}
+
+async function readArtifactFromUnlockBody(request: IncomingMessage, artifactId: string): Promise<AnalysisResult | null> {
+  const body = await readJson(request).catch(() => null);
+  const artifact = body && typeof body === 'object' && 'artifact' in body
+    ? (body as { artifact?: unknown }).artifact
+    : null;
+  const parsed = AnalysisResultSchema.safeParse(artifact);
+
+  if (!parsed.success || parsed.data.acceptedMarket?.id !== artifactId) {
+    return null;
+  }
+
+  return parsed.data;
 }
 
 async function requireGatewayPayment(request: IncomingMessage, response: ServerResponse, artifactId: string, next: () => void) {

@@ -93,23 +93,28 @@ export function MarketScreen({
     setUnlockState({ status: 'checking' });
 
     try {
-      const unpaidResponse = await fetch(pipelineRun.x402.intelligenceUrl);
-      const requiredProof = unpaidResponse.status === 402
-        ? await unpaidResponse.json().catch(() => null) as X402RequiredProof | null
-        : null;
+      let requiredProof: X402RequiredProof | null = null;
 
-      if (unpaidResponse.status !== 402) {
-        setUnlockState({ status: unpaidResponse.ok ? 'unlocked' : 'failed' });
-        if (!unpaidResponse.ok) {
-          emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: String(unpaidResponse.status) });
+      if (!pipelineRun.analysis) {
+        const unpaidResponse = await fetch(pipelineRun.x402.intelligenceUrl);
+        requiredProof = unpaidResponse.status === 402
+          ? await unpaidResponse.json().catch(() => null) as X402RequiredProof | null
+          : null;
+
+        if (unpaidResponse.status !== 402) {
+          setUnlockState({ status: unpaidResponse.ok ? 'unlocked' : 'failed' });
+          if (!unpaidResponse.ok) {
+            emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: String(unpaidResponse.status) });
+          }
+          return;
         }
-        return;
       }
 
       setUnlockState({ status: 'paying', requiredProof });
       const unlockResponse = await fetch(pipelineRun.x402.demoUnlockUrl ?? pipelineRun.x402.intelligenceUrl.replace(/\/intelligence$/, '/demo-unlock'), {
         method: 'POST',
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artifact: pipelineRun.analysis ?? null }),
       });
       const payload = await unlockResponse.json().catch(() => null) as DemoUnlockPayload | null;
 
