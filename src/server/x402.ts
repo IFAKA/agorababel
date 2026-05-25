@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { GatewayClient } from '@circle-fin/x402-batching/client';
 import { createGatewayMiddleware, type PaymentRequest } from '@circle-fin/x402-batching/server';
-import type { AnalysisResult, X402PublicationStatus } from '../app/pipeline/analysisSchema';
-import { getRuntimeConfig } from './config';
-import { methodNotAllowed, sendError, sendJson } from './http';
+import type { AnalysisResult, X402PublicationStatus } from '../app/pipeline/analysisSchema.ts';
+import { getRuntimeConfig } from './config.ts';
+import { methodNotAllowed, sendError, sendJson } from './http.ts';
 
 const artifactStore = new Map<string, AnalysisResult>();
 const arcTestnetNetwork = 'eip155:5042002';

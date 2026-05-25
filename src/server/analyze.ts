@@ -1,18 +1,18 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
-import { AnalysisResultSchema, analyzeRequestSchema, type AnalysisResult, type PipelineStage } from '../app/pipeline/analysisSchema';
-import { commitArcTrace } from './arcTrace';
-import { getCircleAgentWalletStatus } from './circleWallet';
-import { getMissingProductionConfig, getRuntimeStatus } from './config';
-import { enforceCritic } from './criticReview';
-import { handleEventsRequest } from './events';
-import { methodNotAllowed, readJson, sendError, sendJson } from './http';
-import { analyzeWithConfiguredLlm, type LlmDraft } from './llmStructured';
-import { normalizeCandidateMarkets } from './marketDrafting';
-import { compareMarketNovelty } from './marketComparison';
-import { discoverOfficialResolver, verifyResolver, type ResolverDiscoveryResult } from './resolverVerification';
-import { extractSource } from './sourceExtraction';
-import { handleMarketIntelligenceRequest, publishX402Artifact } from './x402';
+import { AnalysisResultSchema, analyzeRequestSchema, type AnalysisResult, type PipelineStage } from '../app/pipeline/analysisSchema.ts';
+import { commitArcTrace } from './arcTrace.ts';
+import { getCircleAgentWalletStatus } from './circleWallet.ts';
+import { getMissingProductionConfig, getRuntimeStatus } from './config.ts';
+import { enforceCritic } from './criticReview.ts';
+import { handleEventsRequest } from './events.ts';
+import { methodNotAllowed, readJson, sendError, sendJson } from './http.ts';
+import { analyzeWithConfiguredLlm, type LlmDraft } from './llmStructured.ts';
+import { normalizeCandidateMarkets } from './marketDrafting.ts';
+import { compareMarketNovelty } from './marketComparison.ts';
+import { discoverOfficialResolver, verifyResolver, type ResolverDiscoveryResult } from './resolverVerification.ts';
+import { extractSource } from './sourceExtraction.ts';
+import { handleMarketIntelligenceRequest, publishX402Artifact } from './x402.ts';
 
 type PipelineProgressEvent =
   | { type: 'run-started'; runId: string }

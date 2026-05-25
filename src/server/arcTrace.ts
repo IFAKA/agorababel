@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { MarketQuestion } from '../app/pipeline/analysisSchema';
-import { getRuntimeConfig } from './config';
-import { traceRegistryAbi } from './traceRegistryAbi';
+import type { MarketQuestion } from '../app/pipeline/analysisSchema.ts';
+import { getRuntimeConfig } from './config.ts';
+import { traceRegistryAbi } from './traceRegistryAbi.ts';
 
 export type CommitTraceInput = {
   runId: string;

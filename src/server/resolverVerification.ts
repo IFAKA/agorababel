@@ -1,4 +1,4 @@
-import type { LlmDraft } from './llmStructured';
+import type { LlmDraft } from './llmStructured.ts';
 
 const MAX_DISCOVERY_CANDIDATES = 12;
 const MAX_SEARCH_RESULTS_PER_QUERY = 5;

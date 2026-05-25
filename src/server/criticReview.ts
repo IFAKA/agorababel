@@ -1,4 +1,4 @@
-import type { LlmDraft } from './llmStructured';
+import type { LlmDraft } from './llmStructured.ts';
 
 export type CriticReviewOutcome =
   | { status: 'accepted'; criticVerdict: LlmDraft['criticVerdict'] }

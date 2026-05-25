@@ -1,5 +1,5 @@
-import type { LlmDraft } from './llmStructured';
-import type { verifyResolver } from './resolverVerification';
+import type { LlmDraft } from './llmStructured.ts';
+import type { verifyResolver } from './resolverVerification.ts';
 
 type VerifiedResolver = Awaited<ReturnType<typeof verifyResolver>>;
 

@@ -1,5 +1,5 @@
-import type { CircleAgentWalletStatus } from '../app/pipeline/analysisSchema';
-import { getRuntimeConfig } from './config';
+import type { CircleAgentWalletStatus } from '../app/pipeline/analysisSchema.ts';
+import { getRuntimeConfig } from './config.ts';
 
 export async function getCircleAgentWalletStatus(): Promise<CircleAgentWalletStatus> {
   const config = getRuntimeConfig();

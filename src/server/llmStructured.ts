@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { analysisJsonSchema } from '../app/pipeline/analysisSchema';
-import { getRuntimeConfig } from './config';
+import { analysisJsonSchema } from '../app/pipeline/analysisSchema.ts';
+import { getRuntimeConfig } from './config.ts';
 
 const MAX_LLM_SOURCE_CHARS = 5000;
 const GROQ_ROOT_OBJECT_CORRECTION = [

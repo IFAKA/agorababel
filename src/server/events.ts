@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { methodNotAllowed, readJson, sendError, sendJson } from './http';
+import { methodNotAllowed, readJson, sendError, sendJson } from './http.ts';
 
 const eventNames = new Set([
   'source_submitted',
