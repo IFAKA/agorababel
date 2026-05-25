@@ -3,6 +3,8 @@ import { analysisJsonSchema } from '../app/pipeline/analysisSchema.ts';
 import { getRuntimeConfig } from './config.ts';
 
 const MAX_LLM_SOURCE_CHARS = 5000;
+const GROQ_MAX_ATTEMPTS = 4;
+const GROQ_RETRY_FLOOR_MS = 750;
 const GROQ_ROOT_OBJECT_CORRECTION = [
   'Schema repair: the previous generation used a JSON array as the response root.',
   'Return one artifact object directly. Do not wrap it in an array, even if the source contains multiple claims.',
@@ -116,14 +118,14 @@ async function callGroq(sourceText: string, onNote?: (message: string) => void) 
   }
 
   const config = getRuntimeConfig();
-  const response = await callGroqCompletion(sourceText, config.model);
+  const response = await callGroqCompletionWithRetry(sourceText, config.model, undefined, onNote);
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
 
     if (isGroqSchemaValidationFailure(detail)) {
       onNote?.('Groq rejected generated JSON; retrying with explicit root-object instruction');
-      const retry = await callGroqCompletion(sourceText, config.model, GROQ_ROOT_OBJECT_CORRECTION);
+      const retry = await callGroqCompletionWithRetry(sourceText, config.model, GROQ_ROOT_OBJECT_CORRECTION, onNote);
 
       if (retry.ok) {
         return readGroqContent(retry);
@@ -139,6 +141,20 @@ async function callGroq(sourceText: string, onNote?: (message: string) => void) 
   return readGroqContent(response);
 }
 
+async function callGroqCompletionWithRetry(sourceText: string, model: string, correction?: string, onNote?: (message: string) => void) {
+  let response = await callGroqCompletion(sourceText, model, correction);
+
+  for (let attempt = 1; response.status === 429 && attempt < GROQ_MAX_ATTEMPTS; attempt += 1) {
+    const detail = await response.text().catch(() => '');
+    const delayMs = getGroqRetryDelayMs(response, detail, attempt);
+    onNote?.(`Groq rate limited request; retrying in ${Math.round(delayMs / 100) / 10}s`);
+    await sleep(delayMs);
+    response = await callGroqCompletion(sourceText, model, correction);
+  }
+
+  return response;
+}
+
 async function callGroqCompletion(sourceText: string, model: string, correction?: string) {
   return fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -148,6 +164,37 @@ async function callGroqCompletion(sourceText: string, model: string, correction?
     },
     body: JSON.stringify(createGroqRequestBody(sourceText, model, correction)),
   });
+}
+
+function getGroqRetryDelayMs(response: Response, detail: string, attempt: number) {
+  const retryAfter = Number(response.headers.get('retry-after'));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.max(retryAfter * 1000, GROQ_RETRY_FLOOR_MS);
+  }
+
+  const retryMessageDelay = parseRetryMessageDelayMs(detail);
+  if (retryMessageDelay) {
+    return Math.max(retryMessageDelay, GROQ_RETRY_FLOOR_MS);
+  }
+
+  return GROQ_RETRY_FLOOR_MS * 2 ** (attempt - 1);
+}
+
+function parseRetryMessageDelayMs(detail: string) {
+  const match = detail.match(/try again in\s+([\d.]+)\s*(ms|milliseconds?|s|sec|seconds?|m|min|minutes?)/i);
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  const unit = match[2].toLowerCase();
+  if (unit.startsWith('ms') || unit.startsWith('millisecond')) return amount;
+  if (unit === 'm' || unit.startsWith('min')) return amount * 60_000;
+  return amount * 1000;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function readGroqContent(response: Response) {
