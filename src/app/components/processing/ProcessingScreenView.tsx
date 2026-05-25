@@ -1482,24 +1482,27 @@ function createArtifactView({
                 <ArtifactField label="Status" value={publication?.status ?? 'disabled'} />
               </StepReveal>
               <StepReveal index={3}>
-                <ArtifactField label="Price" value={formatUsdcPrice(publication?.priceUsdcMicro)} />
+                <ArtifactField label="Final artifact access payment" value={formatUsdcPrice(publication?.priceUsdcMicro)} />
               </StepReveal>
               <StepReveal index={4}>
-                <ArtifactField label="Pay-to address" value={publication?.payToAddress ?? 'No seller wallet configured'} />
+                <ArtifactField label="Buyer Agent" value={publication?.demoUnlockUrl ? 'Configured demo buyer wallet' : 'Not configured'} />
               </StepReveal>
               <StepReveal index={5}>
-                <ArtifactField label="Gateway" value={publication?.gatewayUrl ?? 'Not configured'} />
+                <ArtifactField label="AgoraBabel Seller Wallet" value={publication?.payToAddress ?? 'No seller wallet configured'} />
               </StepReveal>
               <StepReveal index={6}>
-                <ArtifactField label="Facilitator" value={publication?.facilitatorUrl ?? 'Not configured'} />
+                <ArtifactField label="Gateway" value={publication?.gatewayUrl ?? 'Not configured'} />
               </StepReveal>
               <StepReveal index={7}>
-                <ArtifactField label="Network" value={publication?.network ?? 'Not configured'} />
+                <ArtifactField label="Facilitator" value={publication?.facilitatorUrl ?? 'Not configured'} />
               </StepReveal>
               <StepReveal index={8}>
-                <ArtifactField label="Intelligence URL" value={publication?.intelligenceUrl ?? 'Not published'} />
+                <ArtifactField label="Network" value={publication?.network ?? 'Not configured'} />
               </StepReveal>
               <StepReveal index={9}>
+                <ArtifactField label="Intelligence URL" value={publication?.intelligenceUrl ?? 'Not published'} />
+              </StepReveal>
+              <StepReveal index={10}>
                 <ArtifactField label="Unlock URL" value={publication?.demoUnlockUrl ?? 'Not available'} />
               </StepReveal>
             </div>

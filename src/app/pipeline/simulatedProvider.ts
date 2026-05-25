@@ -443,12 +443,12 @@ function createDemoTrace(seed: string, timestamp: string): ArcTrace {
 }
 
 function createDemoX402(acceptedMarket: AcceptedMarket): NonNullable<PipelineRun['x402']> {
-  const artifactId = `preview-${acceptedMarket.id}`;
+  const artifactId = acceptedMarket.id;
 
   return {
     status: 'required',
     artifactId,
-    priceUsdcMicro: 250000,
+    priceUsdcMicro: 10000,
     payToAddress: DEMO_WALLET_ADDRESS,
     facilitatorUrl: 'https://gateway-api-testnet.circle.com',
     gatewayUrl: 'https://gateway-api-testnet.circle.com',
@@ -703,7 +703,7 @@ function createCandidateMarkets(ingestion: SourceAnalysis, context: ContextAnaly
 
   return [
     {
-      id: 'draft-official-action',
+      id: createDemoMarketId(ingestion),
       question: createQuestion(ingestion, deadline),
       yesCriteria: ingestion.region === 'Chile' && ingestion.topic.includes('CEOL')
         ? `YES if ${resolutionSource} publishes ratification, toma de razon, or another official confirmation that the Laguna Verde CEOL is approved before ${deadline}.`
@@ -1000,6 +1000,27 @@ function createQuestion(ingestion: SourceAnalysis, deadline: string): string {
   }
 
   return `Will the named authority officially confirm ${ingestion.topic.toLowerCase()} before ${deadline}?`;
+}
+
+function createDemoMarketId(ingestion: SourceAnalysis): string {
+  const deadline = defaultDeadline(ingestion);
+
+  if (ingestion.region === 'Chile' && ingestion.topic.includes('CEOL')) {
+    return `chile-laguna-verde-ceol-ratification-${deadline.slice(0, 4)}`;
+  }
+
+  const slug = [
+    ingestion.region,
+    ingestion.topic,
+    ...ingestion.entities.slice(0, 2),
+    deadline,
+  ].join(' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 96);
+
+  return slug || `market-${awaitlessShaSeed(`${ingestion.signalName}:${ingestion.sourceDate}`)}`;
 }
 
 function detectSourceDate(sourceInput: string): string {

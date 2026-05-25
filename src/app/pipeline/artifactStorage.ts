@@ -16,7 +16,7 @@ export function getMarketPath(slug = DEFAULT_MARKET_SLUG) {
 
 export function getPipelineRunSlug(run: PipelineRun) {
   if (!run.acceptedMarket) return DEFAULT_MARKET_SLUG;
-  return slugify(run.acceptedMarket.question) || run.acceptedMarket.id || DEFAULT_MARKET_SLUG;
+  return run.acceptedMarket.id || DEFAULT_MARKET_SLUG;
 }
 
 export function persistCompletedPipelineRun(run: PipelineRun, slug = DEFAULT_MARKET_SLUG) {
@@ -53,12 +53,4 @@ function readStoredPipelineRun(slug: string): PipelineRun | null {
   }
 
   return null;
-}
-
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 140);
 }

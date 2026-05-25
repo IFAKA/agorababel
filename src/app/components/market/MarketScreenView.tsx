@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, Check, Clipboard, Download, ExternalLink, LoaderCircle, LockKeyhole, ReceiptText, Share2, WalletCards } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createSourceExcerpt, describeTraceForMemo, formatRejectedReason, isCommittedTrace } from '../../artifactHelpers';
 import { useCallLoadingPresentation } from '../../hooks/useCallLoadingPresentation';
 import { emitProductEvent } from '../../pipeline/apiProvider';
@@ -19,6 +19,7 @@ export function MarketScreen({
   const [feedback, setFeedback] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const [unlockState, setUnlockState] = useState<X402UnlockState>({ status: 'idle' });
+  const autoUnlockKeyRef = useRef<string | null>(null);
   const visibleUnlockState = useCallLoadingPresentation(unlockState, isX402UnlockLoading, getX402UnlockStateKey);
   const market = pipelineRun.acceptedMarket;
   const ingestion = pipelineRun.ingestion;
@@ -82,6 +83,11 @@ export function MarketScreen({
       emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: 'disabled' });
       return;
     }
+    if (pipelineRun.x402.status === 'failed') {
+      setUnlockState({ status: 'failed', error: 'x402 publication failed for this artifact.' });
+      emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: 'publication-failed' });
+      return;
+    }
 
     emitProductEvent('x402_unlock_started', { artifactId: market?.id, runId: pipelineRun.id });
     setUnlockState({ status: 'checking' });
@@ -124,6 +130,17 @@ export function MarketScreen({
       emitProductEvent('x402_unlock_failed', { artifactId: market?.id, runId: pipelineRun.id, stage: 'payment-required' });
     }
   };
+
+  useEffect(() => {
+    const x402 = pipelineRun.x402;
+    if (!x402 || x402.status !== 'required' || !x402.demoUnlockUrl || unlockState.status !== 'idle') return;
+
+    const autoUnlockKey = `${pipelineRun.id}:${x402.artifactId}`;
+    if (autoUnlockKeyRef.current === autoUnlockKey) return;
+
+    autoUnlockKeyRef.current = autoUnlockKey;
+    void handleUnlock();
+  }, [pipelineRun.x402, pipelineRun.id, unlockState.status]);
 
   useEffect(() => {
     if (market) emitProductEvent('artifact_opened', { artifactId: market.id, runId: pipelineRun.id });
@@ -417,7 +434,10 @@ function X402Panel({
       <div className="flex items-start gap-2">
         <LockKeyhole aria-hidden="true" className="mt-0.5 shrink-0 text-[#8C3D32]" size={16} />
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-[#292824]">Payment required until the buyer agent signs.</p>
+          <p className="text-sm font-semibold text-[#292824]">Final artifact access payment</p>
+          <p className="mt-1 text-sm leading-6 text-[#625F57]">
+            Buyer Agent pays once; AgoraBabel Seller Wallet receives the x402 payment.
+          </p>
           {x402.network?.toLowerCase().includes('preview') && (
             <p className="mt-1 text-sm font-semibold text-[#77746B]">Disabled for this run</p>
           )}
@@ -425,28 +445,30 @@ function X402Panel({
         </div>
       </div>
       <div className="mt-3 grid gap-2 text-sm text-[#625F57]">
-        <X402Fact label="Price" value={`${formatMicroUsdc(x402.priceUsdcMicro)} USDC (${x402.priceUsdcMicro ?? 0} micro-USDC)`} />
-        <X402Fact label="Seller" value={x402.payToAddress ?? 'No seller wallet configured'} />
+        <X402Fact label="Payment" value={`${formatMicroUsdc(x402.priceUsdcMicro)} USDC (${x402.priceUsdcMicro ?? 0} micro-USDC)`} />
+        <X402Fact label="Buyer Agent" value="Configured demo buyer wallet" />
+        <X402Fact label="AgoraBabel Seller Wallet" value={x402.payToAddress ?? 'No seller wallet configured'} />
         <X402Fact label="Gateway" value={x402.gatewayUrl ?? x402.facilitatorUrl ?? 'Circle Gateway testnet'} />
         <X402Fact label="Network" value={x402.network ?? 'Arc Testnet'} />
       </div>
-      <button
-        type="button"
-        onClick={onUnlock}
-        disabled={isUnlocking}
-        className="secondary-button pressable mt-3 inline-flex items-center justify-center gap-2 px-4 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {unlockState.status === 'checking' || unlockState.status === 'paying'
-          ? <LoaderCircle aria-hidden="true" className="animate-spin" size={15} />
-          : <WalletCards aria-hidden="true" size={15} />}
-        Pay with Buyer Agent
-      </button>
-      {unlockState.status === 'checking' && <p className="mt-2 text-sm font-medium text-[#625F57]">Checking unpaid endpoint for a 402 challenge…</p>}
+      <div className="mt-3 rounded border border-[#E5E1D8] bg-white p-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-[#292824]">
+          {isUnlocking ? <LoaderCircle aria-hidden="true" className="animate-spin" size={15} /> : getUnlockStatusIcon(unlockState)}
+          {getUnlockStatusLabel(unlockState)}
+        </div>
+        {unlockState.status === 'idle' && (
+          <p className="mt-2 text-sm leading-6 text-[#625F57]">Automatic x402 unlock starts when the artifact opens.</p>
+        )}
+        <p className="mt-2 text-sm leading-6 text-[#625F57]">
+          Source reader, claim extractor, resolver checker, market comparison, critic, wallet/proof publisher, and x402 publisher are provenance contributors, not payment recipients.
+        </p>
+      </div>
+      {unlockState.status === 'checking' && <p className="mt-2 text-sm font-medium text-[#625F57]">Checking payment requirement</p>}
       {unlockState.status === 'paying' && (
         <div className="mt-3 rounded border border-[#E5E1D8] bg-white p-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8C3D32]">402 Required Proof</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8C3D32]">Buyer agent paying {formatMicroUsdc(x402.priceUsdcMicro)} USDC</p>
           <p className="mt-2 text-sm leading-6 text-[#625F57]">
-            The intelligence endpoint returned payment required. The buyer agent is signing and settling through Circle Gateway.
+            The intelligence endpoint returned payment required. The Buyer Agent is signing and settling through Circle Gateway.
           </p>
         </div>
       )}
@@ -457,26 +479,54 @@ function X402Panel({
             Paid receipt
           </div>
           <div className="mt-2 grid gap-2 text-sm text-[#625F57]">
-            <X402Fact label="Buyer" value={unlockState.unlock?.buyer ?? unlockState.unlock?.receipt?.payer ?? 'Buyer address unavailable'} />
-            <X402Fact label="Settlement" value={unlockState.unlock?.receipt?.settlementTransaction ?? 'Settlement accepted by Gateway'} />
+            <X402Fact label="Buyer Agent" value={unlockState.unlock?.buyer ?? unlockState.unlock?.receipt?.payer ?? 'Buyer address unavailable'} />
+            <X402Fact label="AgoraBabel Seller Wallet" value={unlockState.unlock?.receipt?.seller ?? x402.payToAddress ?? 'Seller address unavailable'} />
+            <X402Fact label="Amount" value={`${unlockState.unlock?.receipt?.formattedPrice ?? formatMicroUsdc(x402.priceUsdcMicro)} USDC`} />
+            <X402Fact label="Settlement ID" value={unlockState.unlock?.receipt?.settlementTransaction ?? 'Settlement accepted by Gateway'} />
             {unlockState.unlock?.deposit && (
-              <X402Fact label="Deposit" value={`${unlockState.unlock.deposit.amountUsdc} USDC / ${unlockState.unlock.deposit.depositTxHash}`} />
+              <X402Fact label="Gateway deposit tx" value={`${unlockState.unlock.deposit.amountUsdc} USDC / ${unlockState.unlock.deposit.depositTxHash}`} />
             )}
           </div>
         </div>
       )}
       {unlockState.status === 'failed' && (
-        <p className="mt-2 text-sm font-medium text-[#8C3D32]">
-          Buyer-agent unlock failed{unlockState.error ? `: ${unlockState.error}` : '.'}
-        </p>
+        <div className="mt-3">
+          <p className="text-sm font-medium text-[#8C3D32]">
+            Payment failed{unlockState.error ? `: ${unlockState.error}` : '.'}
+          </p>
+          <button
+            type="button"
+            onClick={onUnlock}
+            disabled={isUnlocking}
+            className="secondary-button pressable mt-2 inline-flex items-center justify-center gap-2 px-4 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <WalletCards aria-hidden="true" size={15} />
+            Retry payment
+          </button>
+        </div>
       )}
     </ProofPanel>
   );
 }
 
+function getUnlockStatusLabel(state: X402UnlockState) {
+  if (state.status === 'checking') return 'Checking payment requirement';
+  if (state.status === 'paying') return 'Buyer agent paying 0.01 USDC';
+  if (state.status === 'unlocked') return 'Paid receipt';
+  if (state.status === 'failed') return 'Payment failed';
+  if (state.status === 'disabled') return 'Payment disabled';
+  return 'Checking payment requirement';
+}
+
+function getUnlockStatusIcon(state: X402UnlockState) {
+  if (state.status === 'unlocked') return <ReceiptText aria-hidden="true" size={15} />;
+  if (state.status === 'failed') return <WalletCards aria-hidden="true" size={15} />;
+  return <LockKeyhole aria-hidden="true" size={15} />;
+}
+
 function X402Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid gap-1 sm:grid-cols-[5.5rem_1fr]">
+    <div className="grid gap-1 sm:grid-cols-[9rem_1fr]">
       <span className="font-medium text-[#77746B]">{label}</span>
       <span className="min-w-0 break-all text-[#292824]">{value}</span>
     </div>

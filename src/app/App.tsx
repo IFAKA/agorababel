@@ -254,7 +254,7 @@ export default function App() {
       return;
     }
 
-    const slug = pipelineRun.sourceInput === sampleArticle.sourceText ? DEFAULT_MARKET_SLUG : getPipelineRunSlug(pipelineRun);
+    const slug = getPipelineRunSlug(pipelineRun);
     const path = getMarketPath(slug);
     persistCompletedPipelineRun(pipelineRun, slug);
 
@@ -368,9 +368,6 @@ export default function App() {
     if (pipelineRun.status === 'complete' && pipelineRun.acceptedMarket) {
       const slug = getPipelineRunSlug(pipelineRun);
       persistCompletedPipelineRun(pipelineRun, slug);
-      if (pipelineRun.sourceInput === sampleArticle.sourceText) {
-        persistCompletedPipelineRun(pipelineRun, DEFAULT_MARKET_SLUG);
-      }
     }
   }, [pipelineRun]);
 
