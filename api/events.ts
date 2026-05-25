@@ -1,1 +1,1 @@
-export { handleEventsRequest as default } from '../src/server/analyze';
+export { handleEventsRequest as default } from '../src/server/analyze.ts';

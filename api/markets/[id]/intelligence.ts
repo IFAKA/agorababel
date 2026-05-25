@@ -1,1 +1,1 @@
-export { handleMarketIntelligenceRequest as default } from '../../../src/server/analyze';
+export { handleMarketIntelligenceRequest as default } from '../../../src/server/analyze.ts';

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createAnalyzeErrorPayload, handleAnalyzeStreamRequest } from '../../src/server/analyze';
+import { createAnalyzeErrorPayload, handleAnalyzeStreamRequest } from '../../src/server/analyze.ts';
 
 export default async function analyzeStreamApi(request: IncomingMessage, response: ServerResponse) {
   try {

@@ -1,1 +1,1 @@
-export { handleRuntimeStatusRequest as default } from '../src/server/analyze';
+export { handleRuntimeStatusRequest as default } from '../src/server/analyze.ts';

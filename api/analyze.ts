@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createAnalyzeErrorPayload, handleAnalyzeRequest } from '../src/server/analyze';
-import { sendError } from '../src/server/http';
+import { createAnalyzeErrorPayload, handleAnalyzeRequest } from '../src/server/analyze.ts';
+import { sendError } from '../src/server/http.ts';
 
 export default async function analyzeApi(request: IncomingMessage, response: ServerResponse) {
   try {
