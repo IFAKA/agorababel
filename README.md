@@ -147,3 +147,11 @@ X402_FACILITATOR_URL=https://...
 - `src/app/components/ProcessingScreen.tsx`: nine-stage workflow UI.
 - `src/app/components/MarketScreen.tsx`: final artifact and proof panels.
 - `contracts/TraceRegistry.sol`: minimal trace registry contract.
+
+---
+
+## Support
+
+If this project is useful to you, you can support my work:
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/zfaka)
